@@ -3,17 +3,29 @@ import { apply, inject } from '../src/plugin.ts'
 import { acpLog, makeAgent, makeGoal, makeSession } from './helpers.ts'
 
 describe('production apply() inject shape', () => {
-  it('lists subagents (and goals, tools) so Cordis allows ctx.subagents', () => {
+  it('lists goals, subagents, tools, and systemPrompt (dsh-tool-subagent caller set + goals)', () => {
     expect(inject).toContain('goals')
     expect(inject).toContain('subagents')
     expect(inject).toContain('tools')
+    expect(inject).toContain('systemPrompt')
+    expect(inject).toEqual(['goals', 'subagents', 'tools', 'systemPrompt'])
   })
 
-  it('a plugin ctx without inject([subagents]) is not the production apply() shape', () => {
-    const incomplete = ['goals']
-    expect(incomplete.includes('subagents')).toBe(false)
+  it('a plugin ctx without inject([subagents, systemPrompt]) is not the production apply() shape', () => {
+    const missingSubagents = ['goals']
+    const missingSystemPrompt = ['goals', 'subagents', 'tools']
+    expect(missingSubagents.includes('subagents')).toBe(false)
+    expect(missingSystemPrompt.includes('systemPrompt')).toBe(false)
     expect(inject.includes('subagents')).toBe(true)
-    expect(inject).not.toEqual(incomplete)
+    expect(inject.includes('systemPrompt')).toBe(true)
+    expect(inject).not.toEqual(missingSubagents)
+    expect(inject).not.toEqual(missingSystemPrompt)
+  })
+
+  it('does not kitchen-sink agents, sessions, or agentPresets on apply() inject', () => {
+    expect(inject).not.toContain('agents')
+    expect(inject).not.toContain('sessions')
+    expect(inject).not.toContain('agentPresets')
   })
 
   it('apply() on a grok-build parent with injected subagents calls start()', async () => {

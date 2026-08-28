@@ -21,8 +21,18 @@ import { agentScopedRoundDriverEnabled, isLumineAcpSession, turnEndKind } from '
 import { installToolsExecuteWrap } from './tools-wrap.ts'
 
 export const name = 'lumine-goal-completion'
-/** Cordis: `ctx.subagents` throws without this. Same consumer set as dsh-tool-subagent. */
-export const inject = ['goals', 'subagents', 'tools']
+/**
+ * Caller-fiber services `start()` reads as hard `ctx.*` properties.
+ * Official `@deepseek-ai/dsh-tool-subagent` inject is
+ * `['tools', 'subagents', 'systemPrompt']`. Published
+ * `applyChildComposition` does `childCtx.systemPrompt.context()` /
+ * `section()` on the caller fiber (r6: `cannot get property "systemPrompt"
+ * without inject`). `agentPresets` / `sandboxPolicy` / `approval` are
+ * `ctx.get(...)` only — those do not throw. `parent.ctx.agents.create`
+ * already ran in r6 before the systemPrompt throw, so `agents` is not a
+ * missing caller-fiber inject. Keep `goals` for harvest complete.
+ */
+export const inject = ['goals', 'subagents', 'tools', 'systemPrompt']
 
 export type { Config } from './config.ts'
 export { resolveConfig, DEFAULT_START_TIMEOUT_MS } from './config.ts'
