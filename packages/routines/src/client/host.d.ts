@@ -1,6 +1,6 @@
 /**
  * Ambient client types. Official DSH packages provide these at runtime.
- * Declared here so the Settings half builds without a sibling DSH checkout.
+ * Declared here so the client half builds without a sibling DSH checkout.
  * Do not redeclare `@deepseek-ai/cordis` here: the host face already owns it.
  */
 
@@ -11,8 +11,14 @@ declare module 'react' {
     readonly currentTarget: T
     readonly target: T
   }
+  export interface KeyboardEvent {
+    readonly key: string
+  }
   export function useEffect(effect: () => void | (() => void), deps?: readonly unknown[]): void
   export function useState<T>(init: T | (() => T)): [T, (value: T | ((prev: T) => T)) => void]
+  export function useCallback<T extends (...args: never[]) => unknown>(fn: T, deps: readonly unknown[]): T
+  export function useId(): string
+  export function useRef<T>(init: T | null): { current: T | null }
   export function createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown
 }
 
@@ -27,11 +33,12 @@ declare module '@deepseek-ai/dsh-client-ui-settings/client' {}
 declare module '@deepseek-ai/dsh-client-locale/client' {}
 declare module '@deepseek-ai/dsh-client-ui-renderer/client' {}
 declare module '@deepseek-ai/dsh-api-remotes/client' {}
+declare module '@deepseek-ai/dsh-client-ui-sidebar/client' {}
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   export type InjectFace<T> = T
   export type PropsLocale<_NS extends string> = { t: (key: string) => string }
-  export type PropsRuntime<_N extends string> = { close?: () => void }
+  export type PropsRuntime<_N extends string> = { close?: () => void; wide?: boolean }
 }
 
 declare module '@deepseek-ai/dsh-client-store' {
@@ -54,6 +61,8 @@ declare module '@deepseek-ai/dsh-client-ui-primitives' {
     onClick?: () => void
     children?: ReactNode
   }): ReactNode
+  export function IconDataOutline16(props?: { className?: string }): ReactNode
+  export function IconCloseOutline16(props?: { className?: string }): ReactNode
 }
 
 declare module '*.module.css' {

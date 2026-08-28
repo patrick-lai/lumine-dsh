@@ -22,7 +22,7 @@ Exactly these five. Never `schedule_*`. Never `schedule/change`. `routine_enable
 - `routine_delete`
 - `routine_run_now` — refuses a paused row
 
-Operator arm is host RPC `routine/enable` / the Settings **Routines** section only. The host class is a live `TypertRemoteService` on namespace `routine` so the gateway SRC-claims `POST /api/routine/*`.
+Operator arm is host RPC `routine/enable` / the left-rail **Routines** pane only. The host class is a live `TypertRemoteService` on namespace `routine` so the gateway SRC-claims `POST /api/routine/*`.
 
 `rule` (clock) is `once`, `interval` (seconds), five-field `cron`, or `manual`. Quiet hours are IANA; wrapping night arcs are allowed. Catch-up is one fire plus a missed-count note, never a backfill storm.
 
@@ -30,4 +30,4 @@ Delivery calls `agents.create` on the already-registered factory. The first user
 
 State lives in `ctx.storageDomain` when that service exists, otherwise `$DSH_HOME/lumine-routines/routines.json` at mode `0600`. The tick is `ctx.interval(30000)` via the existing cordis timer plugin.
 
-The same package ships a browser half (`dsh.client`, `./client`). The official module system loads it when this host plugin is composed, so Settings shows a top-level **Routines** section without editing `~/.dsh/profiles/web/cordis.patch.yml`. Enable, pause, run now, and delete go through host RPC `routine/enable` and friends, not model tools.
+The same package ships a browser half (`dsh.client`, `./client`). The official module system loads it when this host plugin is composed, so the left rail shows **Routines** (`sidebar.footer.action`) without editing `~/.dsh/profiles/web/cordis.patch.yml`. Settings keeps a thin deep-link. Enable, pause, run now, and delete go through host RPC `routine/enable` and friends, not model tools.

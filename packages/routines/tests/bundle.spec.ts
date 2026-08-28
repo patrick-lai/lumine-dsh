@@ -34,13 +34,15 @@ describe('built loader entry', () => {
     expect(built).not.toMatch(/typeof \S+\.interval/)
   })
 
-  it('ships a lazy-CJS client factory for the Routines settings section', () => {
+  it('ships a lazy-CJS client factory for the left-rail Routines pane', () => {
     const client = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
     expect(client).toMatch(/window\.__ModuleLoader__\.load/)
     expect(client).toMatch(/@lumine\/dsh-routines/)
+    expect(client).toMatch(/sidebar\.footer\.action/)
     expect(client).toMatch(/settings\.section/)
     expect(client).toMatch(/routines/)
     expect(client).toMatch(/No routines yet\./)
+    expect(client).toMatch(/Australia\/Sydney/)
     expect(client).not.toMatch(/@deepseek-ai\/dsh-client-ui-settings\/client/)
     expect(client).not.toMatch(/from ["']@deepseek-ai\/dsh-client-ui-settings["']/)
     const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
@@ -50,6 +52,7 @@ describe('built loader entry', () => {
     expect(manifest.dsh?.client?.platform).toBe('web')
     expect(manifest.dsh?.client?.inject).toEqual(expect.arrayContaining([
       '@deepseek-ai/dsh-client-ui-settings',
+      '@deepseek-ai/dsh-client-ui-sidebar',
     ]))
     expect(manifest.exports?.['./client']).toBeDefined()
   })

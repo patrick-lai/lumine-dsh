@@ -6,13 +6,25 @@ vi.mock('../src/client/section.tsx', () => ({
   },
 }))
 
+vi.mock('../src/client/rail.tsx', () => ({
+  RoutinesRailAction: function RoutinesRailAction() {
+    return null
+  },
+}))
+
+vi.mock('../src/client/stage.tsx', () => ({
+  RoutinesStage: function RoutinesStage() {
+    return null
+  },
+}))
+
 import { apply, inject } from '../src/client/index.ts'
 import { createRoutineWire } from '../src/client/rpc.ts'
 import { RoutinesSettingsStore } from '../src/client/store.ts'
 import { snapshotJsonValue } from './snapshot-json.ts'
 
-describe('routines settings section mount', () => {
-  it('registers a top-level settings.section titled Routines', () => {
+describe('routines left-rail mount', () => {
+  it('registers sidebar.footer.action and a thin settings deep-link', () => {
     expect(inject).toEqual(expect.arrayContaining(['slots', 'locale', 'connection']))
     const registered: Array<Record<string, unknown>> = []
     const dictionaries: Array<{ ns: string; en: Record<string, string> }> = []
@@ -51,8 +63,12 @@ describe('routines settings section mount', () => {
       },
     }
     apply(ctx as never)
-    expect(registered).toHaveLength(1)
+    expect(registered).toHaveLength(2)
     expect(registered[0]).toMatchObject({
+      name: 'sidebar.footer.action',
+      id: 'routines',
+    })
+    expect(registered[1]).toMatchObject({
       name: 'settings.section',
       id: 'routines',
     })
@@ -60,7 +76,8 @@ describe('routines settings section mount', () => {
     expect(typeof label).toBe('function')
     expect((label as () => string)()).toBe('Routines')
     expect(dictionaries[0]?.en.empty).toBe('No routines yet.')
-    expect(JSON.stringify(registered[0])).not.toMatch(/Automations|Schedule/)
+    expect(dictionaries[0]?.en.settingsHint).toBe('Routines live on the left rail.')
+    expect(JSON.stringify(registered)).not.toMatch(/Automations|Schedule/)
   })
 
   it('calls host routine/* RPC and keeps list payloads lossless', async () => {
@@ -71,7 +88,7 @@ describe('routines settings section mount', () => {
       promptTemplate: 'ping',
       parameters: {},
       enabled: false,
-      timezone: 'UTC',
+      timezone: 'Australia/Sydney',
       rule: { kind: 'manual' },
       mode: 'cron',
       createdAt: 1,
@@ -105,7 +122,63 @@ describe('routines settings section mount', () => {
     await store.load()
     const snap = store.store.getSnapshot()
     expect(snap.status).toBe('ready')
+    expect(snap.open).toBe(false)
     expect(snap.rows).toEqual([])
     expect(snapshotJsonValue({ routines: snap.rows })).toEqual({ routines: [] })
+    store.togglePane()
+    expect(store.store.getSnapshot().open).toBe(true)
+  })
+
+  it('creates a cron + quiet-hours row paused with Australia/Sydney', async () => {
+    const calls: Array<{ endpoint: string; args: Record<string, unknown> }> = []
+    const store = new RoutinesSettingsStore({
+      async call(_route, endpoint, payload) {
+        calls.push({ endpoint, args: payload.args })
+        if (endpoint === 'routine/create') {
+          return {
+            routine: {
+              id: 'r2',
+              ...(payload.args.input as object),
+              enabled: false,
+              parameters: {},
+              mode: 'cron',
+              createdAt: 1,
+              updatedAt: 1,
+              runCount: 0,
+              deliveryFailures: 0,
+              runs: [],
+            },
+          }
+        }
+        if (endpoint === 'routine/list') return { routines: [] }
+        return {}
+      },
+    })
+    store.beginCreate()
+    store.setDraft({
+      title: 'nightly',
+      prompt: 'ping the board',
+      kind: 'cron',
+      cron: '0 9 * * 1-5',
+      timezone: 'Australia/Sydney',
+      quietEnabled: true,
+      quietStart: '22:00',
+      quietEnd: '07:00',
+      quietWeekdays: [1, 2, 3, 4, 5, 6, 7],
+    })
+    await store.confirmCreate()
+    const create = calls.find(item => item.endpoint === 'routine/create')
+    expect(create?.args.input).toMatchObject({
+      title: 'nightly',
+      promptTemplate: 'ping the board',
+      timezone: 'Australia/Sydney',
+      rule: { kind: 'cron', cron: '0 9 * * 1-5' },
+      quietHours: {
+        timeZoneIdentifier: 'Australia/Sydney',
+        startMinute: 22 * 60,
+        endMinute: 7 * 60,
+        weekdays: [1, 2, 3, 4, 5, 6, 7],
+      },
+    })
   })
 })
