@@ -2,7 +2,10 @@
 
 Lumine capabilities as [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins. This repository is the install home: `dsh plugin --profile web add github:patrick-lai/lumine-dsh` gets everything. Packages inside can also be installed one-by-one later.
 
-**Today that is one plugin:** `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
+**Today that is two plugins:**
+
+- `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
+- `@lumine/dsh-leyline` — a host adapter for an already-running Leyline memory daemon (`http://127.0.0.1:6868` by default). Fire-and-forget: a memory miss never fails a session. **materialize** of `.leyline/LESSONS.md` is opt-in (`false` by default).
 
 Keyword for discovery: `dsh-plugin`.
 
@@ -41,6 +44,17 @@ So this plugin **replaces the Agent factory** and pins the in-page workspace pic
       name: '@deepseek-ai/dsh-host-directory-picker-browse'
     - id: ui-directory-picker-browse
       name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+```
+
+The same root overlay also inserts the Leyline host adapter. It does **not** disable `agent-loop` again and does **not** re-insert the browse picker.
+
+```yaml
+- insert:
+    - id: lumine-leyline
+      name: '@lumine/dsh-leyline'
+      config:
+        baseUrl: http://127.0.0.1:6868
+        materialize: false
 ```
 
 `directory-picker-auto` picks the native macOS dialog on darwin. A detached `dsh` never shows that dialog, so "+ Add workspace" looks dead. The seam is disable+insert of browse (same-id name rewrite is not how later layers swap this row). Clicking an existing workspace still uses `onPick`. **Do not copy those browse rows into the profile `cordis.patch.yml`** if this bundle already inserted them — a second insert is a duplicate loader id. The package-only overlay (`packages/acp-session/cordis.patch.yml`) therefore inserts the factory only.
@@ -137,6 +151,17 @@ A missing CLI fails with `Install X and log in`, not a stack trace.
 
 Permission default is **yolo** (`allow_always` / `--always-approve` / bypass where the product supports it). Tool calls still land in the transcript.
 
+`id: lumine-leyline` (Leyline host adapter — point DSH at a running daemon):
+
+```yaml
+- id: lumine-leyline
+  config:
+    baseUrl: http://127.0.0.1:6868   # already-running leyline-agent-memory
+    materialize: false               # opt-in write of <git-root>/.leyline/LESSONS.md
+```
+
+Fire-and-forget. If the daemon is down the plugin stays silent and healthy. ACP sessions own tools, so compiled recall is not injected as a user bubble; opt-in `materialize` is the filesystem seam. See [packages/leyline/README.md](packages/leyline/README.md).
+
 ## Layout
 
 ```
@@ -145,6 +170,8 @@ lumine-dsh/                      # root bundle (dsh.bundle)
   packages/acp-session/          # @lumine/dsh-acp-session (dsh.bundle)
     src/                         # factory, ACP client, event map, command resolution
     presets/                     # four picker rows, no DSH tools
+  packages/leyline/              # @lumine/dsh-leyline (dsh.bundle)
+    src/                         # HTTP host adapter, probe, payloads, secret scrub
 ```
 
 ## Develop
@@ -162,3 +189,4 @@ Tests use a fake ACP child. They do not require live CLIs.
 - Not a fork of DeepSeek Harness.
 - Not a DSH tool-loop that delegates to these products as one-shot subagents.
 - Not an unofficial ChatGPT/Claude HTTP client.
+- Not a Rust port of Leyline, not a second session log, and not a Memory-stage UI.
