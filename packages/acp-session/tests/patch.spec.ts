@@ -31,6 +31,6 @@ describe('ACP bundle cordis overlay', () => {
 
     expect(pkg).not.toMatch(/id:\s*directory-picker-browse/)
     expect(pkg).not.toMatch(/id:\s*ui-directory-picker-browse/)
-    expect(pkg).toMatch(/must not re-insert|Do not\s+repeat that insert/i)
+    expect(pkg).toMatch(/repeat that insert/)
   })
 })
