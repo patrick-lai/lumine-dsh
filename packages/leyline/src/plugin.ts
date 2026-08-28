@@ -28,7 +28,7 @@ import {
 } from './config.ts'
 import { digestSession, isWorthCapturing } from './digest.ts'
 import { discoverLeyline } from './discover.ts'
-import { firstUserText, recallPrompt, recallUserMessage } from './inject.ts'
+import { firstUserText, insertAfterFirstUser, recallPrompt, recallUserMessage } from './inject.ts'
 import { LeylineMemorySource } from './memory-source.ts'
 import {
   buildLifecycleEvent,
@@ -38,7 +38,7 @@ import {
   type ContextPackResponse,
   type LifecycleKind,
 } from './payloads.ts'
-import { isAbsoluteGitRoot, repoIdFromGitRoot } from './workspace.ts'
+import { isAbsoluteGitRoot, repoIdFromCwd } from './workspace.ts'
 import { ensureDshPeers, DSH_PEERS } from './peers.ts'
 
 export const name = 'lumine-leyline'
@@ -75,11 +75,11 @@ export {
   MATERIALIZE_SCHEMA,
 } from './payloads.ts'
 export { digestSession, isWorthCapturing } from './digest.ts'
-export { isAbsoluteGitRoot, canonicalizeRepoId, repoIdFromGitRoot } from './workspace.ts'
+export { isAbsoluteGitRoot, canonicalizeRepoId, repoIdFromGitRoot, findGitRoot, repoIdFromCwd } from './workspace.ts'
 export { discoverLeyline, candidateBaseUrls, leylineHome } from './discover.ts'
 export { LeylineMemorySource } from './memory-source.ts'
 export type { MemorySource, MemoryRecallHit } from './memory-source.ts'
-export { recallUserMessage, recallPrompt, firstUserText } from './inject.ts'
+export { recallUserMessage, recallPrompt, firstUserText, insertAfterFirstUser, tagSafe } from './inject.ts'
 export { ensureDshPeers, DSH_PEERS }
 
 interface LiveSession {
@@ -99,6 +99,48 @@ function asAgent(...args: unknown[]): Agent | undefined {
     if ('session' in record && 'id' in record) return arg as Agent
   }
   return undefined
+}
+
+interface ToolRegistry {
+  register?: (tool: unknown) => unknown
+  define?: (tool: unknown) => unknown
+  has?: (name: string) => boolean
+  list?: () => unknown
+  names?: () => unknown
+}
+
+function listedToolNames(tools: ToolRegistry | undefined): string[] {
+  if (!tools) return []
+  const names: string[] = []
+  const push = (value: unknown): void => {
+    if (typeof value === 'string') names.push(value)
+    else if (value && typeof value === 'object' && 'name' in value) names.push(String((value as { name: unknown }).name))
+  }
+  if (typeof tools.names === 'function') {
+    const listed = tools.names()
+    if (Array.isArray(listed)) listed.forEach(push)
+  }
+  if (typeof tools.list === 'function') {
+    const listed = tools.list()
+    if (Array.isArray(listed)) listed.forEach(push)
+  }
+  return names
+}
+
+/** True when Leyline is already on the host via dsh-mcp-client (`mcp__leyline__*`). */
+export function hasLeylineMcp(ctx: Context, tools?: ToolRegistry): boolean {
+  if (ctx.get('mcp') || ctx.get('mcpClient') || ctx.get('mcpServers')) return true
+  const registry = tools
+    ?? (ctx as { tools?: ToolRegistry }).tools
+    ?? ctx.get('tools') as ToolRegistry | undefined
+  if (typeof registry?.has === 'function') {
+    if (registry.has('mcp__leyline__recall') || registry.has('mcp__leyline__remember')) return true
+  }
+  return listedToolNames(registry).some(name =>
+    name.startsWith('mcp__leyline__')
+    || name === 'leyline_recall'
+    || name === 'leyline_remember',
+  )
 }
 
 function payloadRecord(...args: unknown[]): Record<string, unknown> {
@@ -200,26 +242,32 @@ export class LumineLeylineHost extends Service {
   }
 
   async onPreStep(payload: unknown, next?: () => Promise<unknown> | unknown): Promise<unknown> {
-    const decision = next ? await next() : payload
-    const record = (decision && typeof decision === 'object' ? decision : payload) as {
+    const incoming = payload && typeof payload === 'object'
+      ? payload as {
+        agent?: Agent
+        messages?: Array<{ role?: string; source?: { kind?: string }; content?: Array<{ type?: string; text?: string }> }>
+        signal?: AbortSignal
+      }
+      : {}
+    const decision = next ? await next() : { kind: 'enter', messages: incoming.messages ?? [] }
+    const record = (decision && typeof decision === 'object' ? decision : {}) as {
       kind?: string
-      messages?: Array<{ role?: string; source?: { kind?: string }; content?: Array<{ type?: string; text?: string }> }>
-      agent?: Agent
+      messages?: typeof incoming.messages
     }
-    const incoming = payload && typeof payload === 'object' ? payload as { agent?: Agent; messages?: typeof record.messages } : {}
-    const agent = incoming.agent ?? record.agent
+    if (record.kind === 'reject') return decision
     if (!this.resolved.autoRecall) return decision
-    if (!agent || record.kind === 'reject') return decision
+    const agent = incoming.agent
+    if (!agent || incoming.signal?.aborted) return decision
     if (isAcpSession(agent.session.header.agentPreset, agent.session.events)) return decision
-    const query = firstUserText(record.messages ?? incoming.messages ?? [])
+    const messages = record.messages ?? incoming.messages ?? []
+    const query = firstUserText(messages)
     if (query.length < MIN_RECALL_QUERY_CHARS) return decision
     try {
       await this.ready
       const compiled = await this.recallFor(agent, query)
       if (!compiled.text) return decision
       const extra = recallUserMessage(recallPrompt(compiled.text))
-      const messages = [...(record.messages ?? incoming.messages ?? []), extra]
-      return { ...record, messages }
+      return { ...record, kind: record.kind ?? 'enter', messages: insertAfterFirstUser(messages, extra) }
     } catch {
       return decision
     }
@@ -232,7 +280,7 @@ export class LumineLeylineHost extends Service {
       return { text: '', recallIds: state.recallIds }
     }
     const cwd = agent.session.header.cwd
-    const repoId = cwd && isAbsoluteGitRoot(cwd) ? repoIdFromGitRoot(cwd) : undefined
+    const repoId = repoIdFromCwd(cwd)
     const pack = await this.memorySource?.contextPack(query, repoId) as ContextPackResponse | undefined
     const compiled = compileRecall(pack)
     state.recallIds = compiled.recallIds
@@ -255,7 +303,8 @@ export class LumineLeylineHost extends Service {
   async onSessionEnd(agent: Agent, rawArgs: unknown[] = []): Promise<void> {
     if (!this.resolved.sessionEventCapture) return
     const payload = payloadRecord(...rawArgs)
-    if (payload.cancelled === true || (payload.reason && payload.reason === 'cancelled')) return
+    const signal = payload.signal as AbortSignal | undefined
+    if (payload.cancelled === true || payload.reason === 'cancelled' || signal?.aborted) return
     const id = String(agent.id)
     const state = this.state(id)
     if (state.settled) return
@@ -270,7 +319,7 @@ export class LumineLeylineHost extends Service {
           sourceSessionId: id,
           workspaceId: this.resolved.workspaceId,
           workspacePath: cwd,
-          repoId: cwd && isAbsoluteGitRoot(cwd) ? repoIdFromGitRoot(cwd) : undefined,
+          repoId: repoIdFromCwd(cwd),
           title: agent.session.header.agentPreset,
           startedAt: digest.startedAt,
           settledAt: digest.settledAt,
@@ -318,7 +367,7 @@ export class LumineLeylineHost extends Service {
   private async onWorkspaceRemoved(payload: Record<string, unknown>): Promise<void> {
     const path = typeof payload.path === 'string' ? payload.path : undefined
     await this.reportLifecycle('workspace_removed', {
-      repoId: path && isAbsoluteGitRoot(path) ? repoIdFromGitRoot(path) : undefined,
+      repoId: repoIdFromCwd(path),
       worktreePath: path,
     })
   }
@@ -342,7 +391,7 @@ export class LumineLeylineHost extends Service {
       const removed = await original(id)
       if (removed) {
         this.forget(this.reportLifecycle('workspace_removed', {
-          repoId: path && isAbsoluteGitRoot(path) ? repoIdFromGitRoot(path) : undefined,
+          repoId: repoIdFromCwd(path),
           worktreePath: path,
         }))
       }
@@ -356,12 +405,8 @@ export class LumineLeylineHost extends Service {
    * tools when no MCP client is mounted.
    */
   private registerThinTools(ctx: Context): void {
-    const mcp = ctx.get('mcp') ?? ctx.get('mcpClient') ?? ctx.get('mcpServers')
-    if (mcp) return
-    const tools = ctx.get('tools') as {
-      register?: (tool: unknown) => unknown
-      define?: (tool: unknown) => unknown
-    } | undefined
+    const tools = (ctx as { tools?: ToolRegistry }).tools ?? ctx.get('tools') as ToolRegistry | undefined
+    if (hasLeylineMcp(ctx, tools)) return
     const register = tools?.register ?? tools?.define
     if (typeof register !== 'function') return
     const source = this.memorySource

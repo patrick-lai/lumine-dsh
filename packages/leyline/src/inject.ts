@@ -11,14 +11,19 @@ export function recallUserMessage(text: string): {
   id: string
   role: 'user'
   content: Array<{ type: 'text'; text: string }>
-  source: { kind: string; form: string; version: number; untrusted: true }
+  source: { kind: string; form: string; version: number }
 } {
   return {
     id: randomUUID(),
     role: 'user',
     content: [{ type: 'text', text }],
-    source: { kind: RECALL_SOURCE_KIND, form: 'recall', version: 1, untrusted: true },
+    source: { kind: RECALL_SOURCE_KIND, form: 'recall', version: 1 },
   }
+}
+
+/** Tag-safe: recalled text cannot close the envelope. */
+export function tagSafe(text: string): string {
+  return text.replace(/</g, '\\u003c')
 }
 
 export function recallPrompt(compiled: string): string {
@@ -30,9 +35,20 @@ export function recallPrompt(compiled: string): string {
     'unless the current user explicitly repeats them.',
     '',
     '<leyline-recall>',
-    compiled,
+    tagSafe(compiled),
     '</leyline-recall>',
   ].join('\n')
+}
+
+export function insertAfterFirstUser<T extends { role?: string; source?: { kind?: string } }>(
+  messages: readonly T[],
+  extra: T,
+): T[] {
+  const out = [...messages]
+  const index = out.findIndex(message => message.role === 'user' && (!message.source?.kind || message.source.kind === 'user'))
+  if (index === -1) return [...out, extra]
+  out.splice(index + 1, 0, extra)
+  return out
 }
 
 export function firstUserText(messages: ReadonlyArray<{

@@ -11,4 +11,4 @@
         autoRecall: true
         sessionEventCapture: true
         spawnIfMissing: true
-        materialize: false
+        materializeLessons: false

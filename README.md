@@ -56,7 +56,7 @@ The same root overlay also inserts the Leyline host adapter. It does **not** dis
         autoRecall: true
         sessionEventCapture: true
         spawnIfMissing: true
-        materialize: false
+        materializeLessons: false
 ```
 
 `directory-picker-auto` picks the native macOS dialog on darwin. A detached `dsh` never shows that dialog, so "+ Add workspace" looks dead. The seam is disable+insert of browse (same-id name rewrite is not how later layers swap this row). Clicking an existing workspace still uses `onPick`. **Do not copy those browse rows into the profile `cordis.patch.yml`** if this bundle already inserted them — a second insert is a duplicate loader id. The package-only overlay (`packages/acp-session/cordis.patch.yml`) therefore inserts the factory only.
@@ -161,7 +161,7 @@ Permission default is **yolo** (`allow_always` / `--always-approve` / bypass whe
     autoRecall: true
     sessionEventCapture: true
     spawnIfMissing: true
-    materialize: false               # opt-in write of <git-root>/.leyline/LESSONS.md
+    materializeLessons: false        # opt-in write of <git-root>/.leyline/LESSONS.md
 ```
 
 Fire-and-forget. If the daemon is down the plugin stays silent and healthy. Prefer `leyline serve --stdio` via `dsh-mcp-client` (`LEYLINE_HOME=~/.leyline`). ACP children skip host-side recall injection (they already have MCP); events are still captured. See [packages/leyline/README.md](packages/leyline/README.md).

@@ -21,7 +21,7 @@
         autoRecall: true
         sessionEventCapture: true
         spawnIfMissing: true
-        materialize: false
+        materializeLessons: false
 
 # Pin the in-page browse directory picker. directory-picker-auto picks native on
 # darwin; a detached `dsh` never shows the macOS dialog, so "+ Add workspace"

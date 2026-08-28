@@ -42,6 +42,8 @@ export const isWorthCapturing = plugin.isWorthCapturing
 export const isAbsoluteGitRoot = plugin.isAbsoluteGitRoot
 export const canonicalizeRepoId = plugin.canonicalizeRepoId
 export const repoIdFromGitRoot = plugin.repoIdFromGitRoot
+export const findGitRoot = plugin.findGitRoot
+export const repoIdFromCwd = plugin.repoIdFromCwd
 export const discoverLeyline = plugin.discoverLeyline
 export const candidateBaseUrls = plugin.candidateBaseUrls
 export const leylineHome = plugin.leylineHome
@@ -50,6 +52,9 @@ export const LumineLeylineHost = plugin.LumineLeylineHost
 export const recallUserMessage = plugin.recallUserMessage
 export const recallPrompt = plugin.recallPrompt
 export const firstUserText = plugin.firstUserText
+export const insertAfterFirstUser = plugin.insertAfterFirstUser
+export const tagSafe = plugin.tagSafe
+export const hasLeylineMcp = plugin.hasLeylineMcp
 export const DSH_PEERS = plugin.DSH_PEERS
 export { ensureDshPeers }
 
