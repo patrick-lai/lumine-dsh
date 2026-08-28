@@ -53,9 +53,10 @@ Creation copies DSH's transaction: `sessions.prepare` → construct Agent → `s
 
 The web composer picker reads host-wide `session.models` (`ctx.llm.listProviders` / `listModels`) plus `selectionFor(agent).current`. That current is `picked` (from `model/selection` pending at the first `selectionFor` call) or `request/header` or settings `agent-default-model` (DeepSeek by default). Host `setup` calls `selectionFor` *before* the ACP child is spawned, and `request/header` is turn-enclosed, so this plugin:
 
-1. Registers a **catalog-only** adapter at factory construct for `claude` / `codex` / `cursor` / `grok` (Grok seeded with live 1.0.5 gold: grok-4.6 / grok-4.5). `stream()` throws; generation stays on the official child.
+1. Registers a **catalog-only** adapter from plugin `apply` (not the factory constructor) for `claude` / `codex` / `cursor` / `grok` (Grok seeded with live 1.0.5 gold: grok-4.6 / grok-4.5). `stream()` throws; generation stays on the official child. `routeServed` is `ctx.llm.listProviders()`.
 2. Appends `model/selection` in the Agent constructor so `picked` is already grok-4.6 when setup runs.
 3. Best-effort `agentDefaultModel.saveSelection` so the deployment default is not DeepSeek.
+4. Writes `request/header` only when that provider is already on `listProviders()`. The live second-prompt miss wrote `{ provider: grok, model: deepseek-v4-flash }` (`agentOptions.model` is the host default). `selectionFor()` then preferred that header and refused `session.prompt` with `no adapter serves provider "grok"`.
 
 `session.selectModel` calls `ctx.llm.resolveCallConfig` then maps onto ACP `session/set_config_option` using the child's option ids (Grok: `grok-4.6` / `grok-4.5` and mode `high`). Authenticate is not called unless the child requires it — Grok's `_meta.defaultAuthMethodId` is `cached_token`; we do not scrape `~/.grok/auth.json`.
 

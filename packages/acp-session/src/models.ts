@@ -47,8 +47,14 @@ export interface AdapterRegistrationHandle {
   replace(providers: string[]): void
 }
 
+export interface CatalogLogger {
+  warn?(...args: unknown[]): void
+  error?(...args: unknown[]): void
+}
+
 export interface LlmRegistry {
   registerAdapter(providers: string[], adapter: AcpCatalogAdapter): AdapterRegistrationHandle
+  listProviders?(): Array<{ id: string; name?: string }>
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -384,6 +390,35 @@ export function selectionFromCatalog(catalog: ProjectedCatalog): HostModelSelect
 }
 
 /**
+ * Route written into `request/header` / `request/context`. Never pair an ACP
+ * provider with the host default model (`deepseek-v4-flash` arrives on
+ * `agentOptions.model` from `agentDefaultModel`).
+ */
+export function catalogRoute(
+  catalog: ProjectedCatalog,
+  selected?: HostModelSelection,
+): { provider: ProviderId; model: string } {
+  const hinted = selected?.provider === catalog.provider ? selected.model : undefined
+  const known = hinted !== undefined && catalog.models.some(model => model.id === hinted)
+  return {
+    provider: catalog.provider,
+    model: known ? hinted : catalog.currentModel,
+  }
+}
+
+/** Host `routeServed` — only `ctx.llm.listProviders()`, not our local map. */
+export function hostServesProvider(
+  llm: { listProviders?: () => Array<{ id: string }> } | undefined,
+  provider: string,
+): boolean {
+  try {
+    return llm?.listProviders?.().some(entry => entry.id === provider) === true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Host `selectionFor(agent).current` fold: picked (from `model/selection`
  * pending at first `selectionFor` call) OR `request/header` OR
  * `agent-default-model`. `model/selection` appended *after* that first call
@@ -629,12 +664,18 @@ export class AcpCatalogRegistry {
   readonly adapter = new AcpCatalogAdapter()
   private handle: AdapterRegistrationHandle | undefined
 
-  constructor(private readonly llm: LlmRegistry | undefined) {}
+  constructor(
+    private readonly llm: LlmRegistry | undefined,
+    private readonly logger?: CatalogLogger,
+  ) {}
 
   /**
    * Advertise every ACP product with a seed catalog. Grok uses the live 1.0.5
    * gold (grok-4.6 / grok-4.5). Other products use a labeled placeholder until
    * that child's initialize + session/new replaces it.
+   *
+   * Call from plugin `apply` via {@link mountAcpCatalog} — `registerAdapter`
+   * uses `ctx.effect`, and the factory constructor fiber is still LOADING.
    */
   seedDefaults(): void {
     for (const provider of PROVIDER_IDS) {
@@ -650,21 +691,67 @@ export class AcpCatalogRegistry {
     this.syncRegistration()
   }
 
+  dispose(): void {
+    const handle = this.handle
+    this.handle = undefined
+    try {
+      handle?.()
+    } catch (error: unknown) {
+      void error
+    }
+  }
+
   private syncRegistration(): void {
     const providers = this.adapter.advertisedProviders()
     if (providers.length === 0) return
+    if (this.llm === undefined) {
+      this.logger?.error?.(
+        'lumine-acp-session: ctx.llm missing; catalog adapter cannot register grok/claude/codex/cursor',
+      )
+      return
+    }
     try {
       if (this.handle === undefined) {
-        this.handle = this.llm?.registerAdapter(providers, this.adapter)
+        this.handle = this.llm.registerAdapter(providers, this.adapter)
       } else {
         this.handle.replace(providers)
       }
     } catch (error: unknown) {
-      // A conflicting host adapter for the same id is unexpected; keep local
-      // projection so select/prompt mapping still has a source of truth.
-      void error
+      this.logger?.error?.(
+        `lumine-acp-session: catalog adapter not registered: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
     }
   }
+}
+
+/**
+ * Register the catalog-only adapter on the host `llm` from plugin `apply`.
+ * `routeServed` / `session.models` read that registry, not a factory-local map.
+ */
+export function mountAcpCatalog(
+  ctx: {
+    llm?: LlmRegistry
+    get?(name: string): unknown
+    logger?: CatalogLogger
+    effect?(fn: () => (() => unknown) | void, label?: string): unknown
+  },
+  catalog = new AcpCatalogRegistry(
+    (ctx.llm ?? ctx.get?.('llm')) as LlmRegistry | undefined,
+    ctx.logger,
+  ),
+): AcpCatalogRegistry {
+  const seed = (): void => { catalog.seedDefaults() }
+  if (ctx.effect !== undefined) {
+    ctx.effect(() => {
+      seed()
+      return () => catalog.dispose()
+    }, 'lumine-acp-session.catalog')
+  } else {
+    seed()
+  }
+  return catalog
 }
 
 /**

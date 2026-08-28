@@ -21,7 +21,9 @@ import {
   type LogOp,
 } from './events.ts'
 import {
+  catalogRoute,
   fallbackCatalog,
+  hostServesProvider,
   lastModelSelection,
   projectAcpModels,
   seedSessionRoute,
@@ -130,11 +132,13 @@ export class AcpSessionAgent implements Agent {
   }
 
   private currentRoute(): { provider: ProviderId; model: string } {
-    const selected = lastModelSelection(this.session.events)
-    if (selected?.provider === this.provider) {
-      return { provider: this.provider, model: selected.model }
-    }
-    return { provider: this.provider, model: this.currentCatalog().currentModel }
+    return catalogRoute(this.currentCatalog(), lastModelSelection(this.session.events))
+  }
+
+  private hostLlm(): { listProviders?: () => Array<{ id: string }> } | undefined {
+    return (this.loopCtx.llm ?? this.loopCtx.get('llm')) as
+      | { listProviders?: () => Array<{ id: string }> }
+      | undefined
   }
 
   /**
@@ -426,9 +430,15 @@ export class AcpSessionAgent implements Agent {
       for (const op of projector.enterStep(user)) appendOp(this.session, op)
       stepped = true
       if (!this.headerLogged) {
-        const reason = hasRequestHeader(this.session.events) ? 'resume' : 'initial'
-        for (const op of projector.syntheticHeader(reason)) appendOp(this.session, op)
-        this.headerLogged = true
+        // selectionFor() prefers request/header over agent-default-model.
+        // Writing provider `grok` while listProviders() has no grok adapter
+        // makes the second prompt model-unavailable. Skip until the catalog
+        // adapter is actually on the host registry.
+        if (hostServesProvider(this.hostLlm(), route.provider)) {
+          const reason = hasRequestHeader(this.session.events) ? 'resume' : 'initial'
+          for (const op of projector.syntheticHeader(reason)) appendOp(this.session, op)
+          this.headerLogged = true
+        }
       }
 
       const child = await this.ensureChild()

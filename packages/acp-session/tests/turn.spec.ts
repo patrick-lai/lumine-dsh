@@ -79,6 +79,8 @@ describe('AcpSessionAgent driver contract', () => {
     expect(source).toMatch(/reportDriverFailure\('kick'/)
     expect(source).toMatch(/logger\.error/)
     expect(source).toMatch(/feedback\/record/)
+    expect(source).toMatch(/hostServesProvider/)
+    expect(source).toMatch(/catalogRoute/)
     expect(source).not.toMatch(/catch \{\s*\/\/ Failures are written/)
   })
 })

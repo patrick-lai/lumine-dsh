@@ -76,7 +76,7 @@ function createSession() {
   }
 }
 
-function createCtx(errors: string[]) {
+function createCtx(errors: string[], served: string[] = []) {
   return {
     logger: {
       warn: () => {},
@@ -86,6 +86,14 @@ function createCtx(errors: string[]) {
     agents: { withInitiator: (_agent: unknown, operation: () => unknown) => operation() },
     on: () => () => {},
     get: () => undefined,
+    llm: {
+      listProviders: () => served.map(id => ({ id, name: id })),
+      registerAdapter() {
+        const handle = (() => {}) as { (): void; replace(next: string[]): void }
+        handle.replace = () => {}
+        return handle
+      },
+    },
   }
 }
 
@@ -148,6 +156,133 @@ describe('AcpSessionAgent first followup', () => {
     expect(Number.isNaN((start?.data as { turn?: number }).turn)).toBe(false)
     expect(session.events.some(event => event.type === 'turn/end')).toBe(true)
     expect(errors.join('\n')).not.toMatch(/non-JSON-serializable/)
+
+    await agent.disposeChild()
+  })
+
+  it('does not write unregistered grok into request/header so the second prompt stays admitted', async () => {
+    const { AcpSessionAgent } = await import('../src/agent.ts')
+    const { AcpCatalogRegistry, hostSelectionCurrent } = await import('../src/models.ts')
+    const errors: string[] = []
+    const session = createSession()
+    const catalog = new AcpCatalogRegistry({
+      registerAdapter() {
+        const handle = (() => {}) as { (): void; replace(next: string[]): void }
+        handle.replace = () => {}
+        return handle
+      },
+    })
+    catalog.seedDefaults()
+    const agent = new AcpSessionAgent(
+      createCtx(errors, ['deepseek-official']) as never,
+      'session-followup-1' as never,
+      { provider: 'grok', model: 'deepseek-v4-flash' },
+      session as never,
+      'grok',
+      {
+        defaultProvider: 'grok',
+        permission: 'yolo',
+        providers: {
+          grok: { command: process.execPath, args: [fakeChild] },
+        },
+      },
+      catalog,
+    )
+
+    agent.followup({
+      id: 'u1',
+      role: 'user',
+      content: [{ type: 'text', text: 'Reply with the single word pong' }],
+      source: { kind: 'user' },
+    } as never)
+    await agent.whenIdle()
+
+    const headers = session.events.filter(event => event.type === 'request/header')
+    expect(headers).toEqual([])
+    const afterFirst = hostSelectionCurrent({
+      requestHeader: undefined,
+      defaultSelection: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    })
+    expect(afterFirst.provider).toBe('deepseek-official')
+
+    agent.followup({
+      id: 'u2',
+      role: 'user',
+      content: [{ type: 'text', text: 'ping' }],
+      source: { kind: 'user' },
+    } as never)
+    await agent.whenIdle()
+
+    expect(session.events.filter(event => event.type === 'request/header')).toEqual([])
+    expect(session.events.filter(event => event.type === 'turn/start').map(event => event.data))
+      .toEqual([{ turn: 1 }, { turn: 2 }])
+    expect(JSON.stringify(session.events.filter(event => event.type === 'request/header')))
+      .not.toMatch(/"provider":"grok"/)
+    expect(errors.join('\n')).not.toMatch(/non-JSON-serializable/)
+
+    await agent.disposeChild()
+  })
+
+  it('writes grok/grok-4.6 into request/header only after the host registry serves grok', async () => {
+    const { AcpSessionAgent } = await import('../src/agent.ts')
+    const { AcpCatalogRegistry, hostSelectionCurrent } = await import('../src/models.ts')
+    const errors: string[] = []
+    const session = createSession()
+    const served = ['claude', 'codex', 'cursor', 'grok']
+    const catalog = new AcpCatalogRegistry({
+      listProviders: () => served.map(id => ({ id })),
+      registerAdapter() {
+        const handle = (() => {}) as { (): void; replace(next: string[]): void }
+        handle.replace = () => {}
+        return handle
+      },
+    })
+    catalog.seedDefaults()
+    const agent = new AcpSessionAgent(
+      createCtx(errors, served) as never,
+      'session-followup-1' as never,
+      { provider: 'grok', model: 'deepseek-v4-flash' },
+      session as never,
+      'grok',
+      {
+        defaultProvider: 'grok',
+        permission: 'yolo',
+        providers: {
+          grok: { command: process.execPath, args: [fakeChild] },
+        },
+      },
+      catalog,
+    )
+
+    agent.followup({
+      id: 'u1',
+      role: 'user',
+      content: [{ type: 'text', text: 'Reply with the single word pong' }],
+      source: { kind: 'user' },
+    } as never)
+    await agent.whenIdle()
+
+    const header = session.events.find(event => event.type === 'request/header')
+    expect(header?.data).toEqual({
+      header: { config: { provider: 'grok', model: 'grok-4.6' } },
+      reason: 'initial',
+    })
+    expect(JSON.stringify(header)).not.toMatch(/deepseek/i)
+    const current = hostSelectionCurrent({
+      requestHeader: { provider: 'grok', model: 'grok-4.6' },
+      defaultSelection: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    })
+    expect(current).toEqual({ provider: 'grok', model: 'grok-4.6' })
+
+    agent.followup({
+      id: 'u2',
+      role: 'user',
+      content: [{ type: 'text', text: 'ping' }],
+      source: { kind: 'user' },
+    } as never)
+    await agent.whenIdle()
+    expect(session.events.filter(event => event.type === 'turn/start').map(event => event.data))
+      .toEqual([{ turn: 1 }, { turn: 2 }])
 
     await agent.disposeChild()
   })

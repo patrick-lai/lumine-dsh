@@ -14,8 +14,12 @@ import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { SessionPreparation } from '@deepseek-ai/dsh-session'
 import { AcpSessionAgent } from './agent.ts'
 import type { ResolvedConfig } from './config.ts'
-import { AcpCatalogRegistry } from './models.ts'
+import { AcpCatalogRegistry, mountAcpCatalog } from './models.ts'
 import { resolveProviderId, type ProviderId } from './providers.ts'
+
+export interface FactoryOptions extends ResolvedConfig {
+  catalog?: AcpCatalogRegistry
+}
 
 // @deepseek-ai/cordis exports `const enum FiberState` (PENDING=0 … UNLOADING=5).
 // Const enums are erased — the published JS has no runtime `FiberState` export.
@@ -112,20 +116,24 @@ async function raceAbortCall<T>(
 export class LumineAcpFactory extends Service implements AgentFactory {
   static inject = ['agents', 'sessions', 'llm']
 
+  readonly resolved: ResolvedConfig
   private readonly ownership: FactoryOwnership
   private readonly runtime: { ctx: Context }
   private readonly catalog: AcpCatalogRegistry
 
-  constructor(ctx: Context, readonly resolved: ResolvedConfig) {
+  constructor(ctx: Context, options: FactoryOptions) {
     super(ctx, 'lumineAcpSession')
+    this.resolved = {
+      defaultProvider: options.defaultProvider,
+      permission: options.permission,
+      providers: options.providers,
+    }
     this.ownership = new FactoryOwnership(ctx.fiber)
     this.runtime = { ctx }
-    this.catalog = new AcpCatalogRegistry(
-      (ctx.llm ?? ctx.get('llm')) as ConstructorParameters<typeof AcpCatalogRegistry>[0],
-    )
-    // Register grok/claude/codex/cursor before any session.create so
-    // routeServed('grok') is true and session.models.groups is not empty.
-    this.catalog.seedDefaults()
+    // Prefer the apply()-mounted registry. registerAdapter uses ctx.effect;
+    // seeding only from this constructor (fiber still LOADING) left grok
+    // off listProviders() and poisoned the second prompt via request/header.
+    this.catalog = options.catalog ?? mountAcpCatalog(ctx)
     ctx.effect(() => () => this.ownership.dispose(), 'lumineAcpSession.transactions()')
     ctx.effect(() => ctx.agents.setFactory(this), 'lumineAcpSession.setFactory()')
   }

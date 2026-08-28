@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   AcpCatalogRegistry,
+  catalogRoute,
   fallbackCatalog,
   grokSeedCatalog,
   hostSelectionCurrent,
+  hostServesProvider,
   lastModelSelection,
+  mountAcpCatalog,
   pickerSnapshot,
   seedSessionRoute,
   selectionFromCatalog,
@@ -96,5 +99,67 @@ describe('host session.models / session.prompt gate (live box failure)', () => {
       model: 'grok-4.6',
       reasoningEffort: 'high',
     })
+  })
+
+  it('reproduces the live second-prompt mix: grok + deepseek-v4-flash is unroutable', () => {
+    const header = { provider: 'grok', model: 'deepseek-v4-flash' }
+    const current = hostSelectionCurrent({
+      requestHeader: header,
+      defaultSelection: DEEPSEEK_DEFAULT,
+    })
+    expect(current).toEqual(header)
+    expect(hostServesProvider({ listProviders: () => [{ id: 'deepseek-official' }] }, current.provider)).toBe(false)
+    expect(hostServesProvider({ listProviders: () => [{ id: 'grok' }] }, 'grok')).toBe(true)
+  })
+
+  it('never pairs the ACP provider with agentOptions.model deepseek-v4-flash', () => {
+    const mixed = { provider: 'grok' as const, model: 'deepseek-v4-flash' }
+    expect(catalogRoute(grokSeedCatalog(), mixed)).toEqual({ provider: 'grok', model: 'grok-4.6' })
+    expect(catalogRoute(grokSeedCatalog(), { provider: 'deepseek-official', model: 'deepseek-v4-flash' }))
+      .toEqual({ provider: 'grok', model: 'grok-4.6' })
+    expect(catalogRoute(grokSeedCatalog(), { provider: 'grok', model: 'grok-4.5' }))
+      .toEqual({ provider: 'grok', model: 'grok-4.5' })
+    expect(JSON.stringify(catalogRoute(grokSeedCatalog(), mixed))).not.toMatch(/deepseek/i)
+  })
+
+  it('mountAcpCatalog registers on the host llm from apply, not a swallowed constructor call', () => {
+    const registered: string[][] = []
+    const errors: string[] = []
+    const llm = {
+      registered,
+      listProviders: () => (registered.at(-1) ?? []).map(id => ({ id })),
+      registerAdapter(providers: string[]) {
+        registered.push([...providers])
+        const handle = (() => {}) as { (): void; replace(next: string[]): void }
+        handle.replace = (next: string[]) => { registered.push([...next]) }
+        return handle
+      },
+    }
+    const effects: Array<() => unknown> = []
+    const catalog = mountAcpCatalog({
+      llm,
+      logger: { error: (message: unknown) => { errors.push(String(message)) } },
+      effect(fn: () => (() => unknown) | void) {
+        const dispose = fn()
+        if (dispose) effects.push(dispose)
+      },
+    })
+    expect(llm.listProviders().map(entry => entry.id)).toEqual(['claude', 'codex', 'cursor', 'grok'])
+    expect(hostServesProvider(llm, 'grok')).toBe(true)
+    expect(catalog.adapter.projected('grok')?.models.map(model => model.id)).toEqual(['grok-4.6', 'grok-4.5'])
+    expect(errors).toEqual([])
+    effects[0]?.()
+    expect(catalog.adapter.advertisedProviders()).toEqual(['claude', 'codex', 'cursor', 'grok'])
+  })
+
+  it('logs when registerAdapter throws instead of leaving grok off listProviders', () => {
+    const errors: string[] = []
+    const registry = new AcpCatalogRegistry({
+      registerAdapter() {
+        throw new Error('DUPLICATE_ADAPTER')
+      },
+    }, { error: (message: unknown) => { errors.push(String(message)) } })
+    registry.seedDefaults()
+    expect(errors.join('\n')).toMatch(/catalog adapter not registered: DUPLICATE_ADAPTER/)
   })
 })

@@ -14,6 +14,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { resolveConfig, type Config } from './config.ts'
 import { LumineAcpFactory } from './factory.ts'
+import { mountAcpCatalog } from './models.ts'
 import { installPickerPresets } from './presets.ts'
 
 export const name = 'lumine-acp-session'
@@ -42,12 +43,15 @@ export {
 export {
   AcpCatalogAdapter,
   AcpCatalogRegistry,
+  catalogRoute,
   configIdForModel,
   configIdForReasoning,
   fallbackCatalog,
   grokSeedCatalog,
   hostSelectionCurrent,
+  hostServesProvider,
   lastModelSelection,
+  mountAcpCatalog,
   pickerSnapshot,
   projectAcpModels,
   seedSessionRoute,
@@ -65,7 +69,10 @@ export function apply(ctx: Context, config: Config = {}): void {
     )
   }
   const resolved = resolveConfig(config)
-  ctx.plugin(LumineAcpFactory, resolved)
+  // Register on the host llm from apply — not the factory constructor —
+  // so listProviders() already contains grok before session.create.
+  const catalog = mountAcpCatalog(ctx)
+  ctx.plugin(LumineAcpFactory, { ...resolved, catalog })
 }
 
 export default {

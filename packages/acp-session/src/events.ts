@@ -137,6 +137,13 @@ export class TurnProjector {
     }]
   }
 
+  /**
+   * Persist the ACP route as the host `request/header` snapshot.
+   *
+   * Host `selectionFor().current` reads this after the first turn (or after
+   * consumeSelection). Do not call this for a provider `ctx.llm.listProviders()`
+   * does not serve — that is the live second-prompt `model-unavailable`.
+   */
   syntheticHeader(reason: 'initial' | 'resume'): LogOp[] {
     return [
       {
