@@ -114,7 +114,14 @@ async function raceAbortCall<T>(
 }
 
 export class LumineAcpFactory extends Service implements AgentFactory {
-  static inject = ['agents', 'sessions', 'llm']
+  /**
+   * Match official `@deepseek-ai/dsh-agent-loop` exactly.
+   * Published `applyChildComposition` hard-gets `childCtx.systemPrompt`
+   * and `childCtx.tools` (r10). `agentPresets` / `sandboxPolicy` /
+   * `approval` are `ctx.get` only. `createScope(loopCtx)` inherits this
+   * whole list — do not drip one name per E2E.
+   */
+  static inject = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt']
 
   readonly resolved: ResolvedConfig
   private readonly ownership: FactoryOwnership
