@@ -67,6 +67,7 @@ describe('production apply() inject shape', () => {
     }
     apply(ctx as never, { fakeJudge: false, timeoutMs: 50 })
     expect(inject).toContain('subagents')
+    expect(inject).toContain('systemPrompt')
     for (const listener of listeners.get('session/event') ?? []) {
       await listener(session, session.events.find(event => event.type === 'turn/end'))
     }
