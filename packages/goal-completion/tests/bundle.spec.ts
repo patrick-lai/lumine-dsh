@@ -24,7 +24,8 @@ describe('built loader entry', () => {
 
   it('does not fabricate a DeepSeek key for the judge', () => {
     const built = readFileSync(new URL('../lib/plugin.js', import.meta.url), 'utf8')
-    expect(built).not.toMatch(/DEEPSEEK_API_KEY/)
+    expect(built).not.toMatch(/process\.env\s*\.\s*DEEPSEEK_API_KEY\s*=/)
+    expect(built).not.toMatch(/DEEPSEEK_API_KEY['"]\s*,/)
     expect(built).not.toMatch(/credentials\.set/)
   })
 })

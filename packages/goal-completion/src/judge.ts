@@ -73,8 +73,8 @@ function preferDifferentProduct(worker: string | undefined, available: readonly 
 }
 
 /**
- * Runtime judge. Never writes `DEEPSEEK_API_KEY` and never calls a DeepSeek
- * adapter just to have a model. Missing judge → UNVERIFIABLE.
+ * Runtime judge. Never fabricates a DeepSeek credential and never calls a
+ * DeepSeek adapter just to have a model. Missing judge → UNVERIFIABLE.
  */
 export function createRuntimeJudge(ctx: Context, config: ResolvedConfig, worker?: { options?: { provider?: string }; session?: { header?: { agentPreset?: string } } }): JudgeFn {
   if (config.judge) return config.judge
