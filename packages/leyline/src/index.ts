@@ -1,7 +1,6 @@
 /**
  * Package entry. Link DSH peers from the profile `node_modules`, then load
- * the plugin. Static `export * from './plugin'` would hoist `@deepseek-ai/cordis`
- * before the symlink exists.
+ * the plugin. Named exports only — DSH drops `inject` on a default export.
  */
 import { ensureDshPeers } from './peers.ts'
 
@@ -15,6 +14,8 @@ export const apply = plugin.apply
 export const resolveConfig = plugin.resolveConfig
 export const SOURCE_CLIENT_ID = plugin.SOURCE_CLIENT_ID
 export const DEFAULT_BASE_URL = plugin.DEFAULT_BASE_URL
+export const MEMORY_SOURCE_ID = plugin.MEMORY_SOURCE_ID
+export const isAcpSession = plugin.isAcpSession
 export const CapabilityCache = plugin.CapabilityCache
 export const parseCapabilities = plugin.parseCapabilities
 export const supportsFeature = plugin.supportsFeature
@@ -37,13 +38,19 @@ export const SESSION_EVENTS_SCHEMA = plugin.SESSION_EVENTS_SCHEMA
 export const LIFECYCLE_SCHEMA = plugin.LIFECYCLE_SCHEMA
 export const MATERIALIZE_SCHEMA = plugin.MATERIALIZE_SCHEMA
 export const digestSession = plugin.digestSession
+export const isWorthCapturing = plugin.isWorthCapturing
 export const isAbsoluteGitRoot = plugin.isAbsoluteGitRoot
 export const canonicalizeRepoId = plugin.canonicalizeRepoId
 export const repoIdFromGitRoot = plugin.repoIdFromGitRoot
+export const discoverLeyline = plugin.discoverLeyline
+export const candidateBaseUrls = plugin.candidateBaseUrls
+export const leylineHome = plugin.leylineHome
+export const LeylineMemorySource = plugin.LeylineMemorySource
 export const LumineLeylineHost = plugin.LumineLeylineHost
+export const recallUserMessage = plugin.recallUserMessage
+export const recallPrompt = plugin.recallPrompt
+export const firstUserText = plugin.firstUserText
 export const DSH_PEERS = plugin.DSH_PEERS
 export { ensureDshPeers }
 
 export type { Config } from './config.ts'
-
-export default plugin.default

@@ -9,6 +9,7 @@ describe('built loader entry', () => {
     expect(entry).not.toMatch(
       /import\s*\{[^}]*\bService\b[^}]*\}\s*from\s*["']@deepseek-ai\/cordis["']/,
     )
+    expect(entry).not.toMatch(/export\s+default/)
   })
 
   it('does not value-import FiberState from @deepseek-ai/cordis', () => {

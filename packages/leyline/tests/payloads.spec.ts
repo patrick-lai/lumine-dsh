@@ -76,12 +76,10 @@ describe('Leyline payload shapes', () => {
     expect(source.client_id).toBe('lumine-dsh')
     expect(source.client_id).not.toBe('raphael')
     const extensions = payload.extensions as {
-      dsh: { receipt: { result: string; recall_ids: string[] } }
-      lumine: { receipt: { result: string } }
+      'lumine-dsh': { receipt: { result: string; recall_ids: string[] } }
     }
-    expect(extensions.dsh.receipt.result).toBe('success')
-    expect(extensions.dsh.receipt.recall_ids).toEqual(['recall_abc123'])
-    expect(extensions.lumine.receipt.result).toBe('success')
+    expect(extensions['lumine-dsh'].receipt.result).toBe('success')
+    expect(extensions['lumine-dsh'].receipt.recall_ids).toEqual(['recall_abc123'])
   })
 
   it('compiles a context-pack into host recall text and recall_ids', () => {

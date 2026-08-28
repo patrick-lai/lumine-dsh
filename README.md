@@ -5,7 +5,7 @@ Lumine capabilities as [DeepSeek Harness](https://github.com/deepseek-ai/deepsee
 **Today that is two plugins:**
 
 - `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
-- `@lumine/dsh-leyline` — a host adapter for an already-running Leyline memory daemon (`http://127.0.0.1:6868` by default). Fire-and-forget: a memory miss never fails a session. **materialize** of `.leyline/LESSONS.md` is opt-in (`false` by default).
+- `@lumine/dsh-leyline` — a host adapter for the existing Leyline daemon/CLI (`~/.leyline`). Discovers `LEYLINE_BASE_URL` → `daemon.json` → `:6868` / `:7893`, then attach-or-spawn. Fire-and-forget: a memory miss never fails a session. **materialize** of `.leyline/LESSONS.md` is opt-in (`false` by default).
 
 Keyword for discovery: `dsh-plugin`.
 
@@ -53,7 +53,9 @@ The same root overlay also inserts the Leyline host adapter. It does **not** dis
     - id: lumine-leyline
       name: '@lumine/dsh-leyline'
       config:
-        baseUrl: http://127.0.0.1:6868
+        autoRecall: true
+        sessionEventCapture: true
+        spawnIfMissing: true
         materialize: false
 ```
 
@@ -151,16 +153,18 @@ A missing CLI fails with `Install X and log in`, not a stack trace.
 
 Permission default is **yolo** (`allow_always` / `--always-approve` / bypass where the product supports it). Tool calls still land in the transcript.
 
-`id: lumine-leyline` (Leyline host adapter — point DSH at a running daemon):
+`id: lumine-leyline` (Leyline host adapter — join the existing `~/.leyline` pool):
 
 ```yaml
 - id: lumine-leyline
   config:
-    baseUrl: http://127.0.0.1:6868   # already-running leyline-agent-memory
+    autoRecall: true
+    sessionEventCapture: true
+    spawnIfMissing: true
     materialize: false               # opt-in write of <git-root>/.leyline/LESSONS.md
 ```
 
-Fire-and-forget. If the daemon is down the plugin stays silent and healthy. ACP sessions own tools, so compiled recall is not injected as a user bubble; opt-in `materialize` is the filesystem seam. See [packages/leyline/README.md](packages/leyline/README.md).
+Fire-and-forget. If the daemon is down the plugin stays silent and healthy. Prefer `leyline serve --stdio` via `dsh-mcp-client` (`LEYLINE_HOME=~/.leyline`). ACP children skip host-side recall injection (they already have MCP); events are still captured. See [packages/leyline/README.md](packages/leyline/README.md).
 
 ## Layout
 
@@ -171,7 +175,7 @@ lumine-dsh/                      # root bundle (dsh.bundle)
     src/                         # factory, ACP client, event map, command resolution
     presets/                     # four picker rows, no DSH tools
   packages/leyline/              # @lumine/dsh-leyline (dsh.bundle)
-    src/                         # HTTP host adapter, probe, payloads, secret scrub
+    src/                         # discover, memorySource, pre-step inject, payloads
 ```
 
 ## Develop

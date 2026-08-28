@@ -8,5 +8,7 @@
     - id: lumine-leyline
       name: '@lumine/dsh-leyline'
       config:
-        baseUrl: http://127.0.0.1:6868
+        autoRecall: true
+        sessionEventCapture: true
+        spawnIfMissing: true
         materialize: false

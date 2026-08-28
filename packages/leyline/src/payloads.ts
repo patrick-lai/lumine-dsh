@@ -217,8 +217,7 @@ export function buildSessionEventsPayload(input: SessionEventsInput): Record<str
       max_tool_preview_chars: MAX_TOOL_PREVIEW_CHARS,
     },
     extensions: {
-      dsh: { adapter: 1, receipt },
-      lumine: { adapter: 1, receipt },
+      'lumine-dsh': { adapter: 1, receipt },
     },
   }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { digestSession } from '../src/digest.ts'
+import { digestSession, isWorthCapturing } from '../src/digest.ts'
 import { settleIdempotencyKey } from '../src/payloads.ts'
 import type { Session } from '@deepseek-ai/dsh-session'
 
@@ -47,5 +47,17 @@ describe('session digest', () => {
     ]))
     expect(digest.result).toBe('failed')
     expect(digest.label).toContain('boom')
+  })
+
+  it('skips empty settlements with no goal, summary, or tools', () => {
+    expect(isWorthCapturing(digestSession(session([
+      { type: 'turn/end', data: { reason: { kind: 'completed' } } },
+    ])))).toBe(false)
+    expect(isWorthCapturing(digestSession(session([
+      {
+        type: 'user/message',
+        data: { message: { content: [{ type: 'text', text: 'hello there' }] } },
+      },
+    ])))).toBe(true)
   })
 })

@@ -147,3 +147,8 @@ export function digestSession(session: Session, recallIds: string[] = []): Sessi
     },
   }
 }
+
+/** Skip empty settlements so the Dreamer is not fed junk. */
+export function isWorthCapturing(digest: SessionDigest): boolean {
+  return Boolean(nonEmpty(digest.goal) || nonEmpty(digest.summary) || digest.toolOutcomes.length > 0)
+}

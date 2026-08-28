@@ -1,11 +1,11 @@
 /**
  * Leyline host adapter for DeepSeek Harness.
  *
- * Talks to an already-running Leyline daemon over HTTP. Fire-and-forget:
- * a memory miss never fails session.create or session.prompt.
+ * Publishes `ctx.memorySource` (id: leyline) and talks to the existing
+ * Leyline daemon / CLI. Fire-and-forget: a memory miss never fails a turn.
  *
- * Loaded via `src/index.ts` after DSH peers are linked. Do not import this
- * file from the package `main` until `ensureDshPeers()` has run.
+ * Loaded via `src/index.ts` after DSH peers are linked. Named exports only —
+ * DSH drops `inject` on a default export.
  *
  * @module @lumine/dsh-leyline
  */
@@ -14,17 +14,23 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session } from '@deepseek-ai/dsh-session'
-import {
-  FEATURE_CONTEXT_PACK,
-  FEATURE_LIFECYCLE,
-  FEATURE_MATERIALIZE,
-  FEATURE_SESSION_EVENTS,
-} from './capabilities.ts'
+import { FEATURE_LIFECYCLE, FEATURE_MATERIALIZE, FEATURE_SESSION_EVENTS } from './capabilities.ts'
+import { leylineRememberDreamer } from './cli.ts'
 import { LeylineClient } from './client.ts'
-import { resolveConfig, type Config, type ResolvedConfig } from './config.ts'
-import { digestSession } from './digest.ts'
 import {
-  buildContextPackRequest,
+  isAcpSession,
+  MIN_RECALL_QUERY_CHARS,
+  RECALL_CACHE_MS,
+  resolveConfig,
+  SOURCE_CLIENT_ID,
+  type Config,
+  type ResolvedConfig,
+} from './config.ts'
+import { digestSession, isWorthCapturing } from './digest.ts'
+import { discoverLeyline } from './discover.ts'
+import { firstUserText, recallPrompt, recallUserMessage } from './inject.ts'
+import { LeylineMemorySource } from './memory-source.ts'
+import {
   buildLifecycleEvent,
   buildMaterializeRequest,
   buildSessionEventsPayload,
@@ -32,14 +38,20 @@ import {
   type ContextPackResponse,
   type LifecycleKind,
 } from './payloads.ts'
-import { isAbsoluteGitRoot, repoIdFromGitRoot, workspaceQuery } from './workspace.ts'
+import { isAbsoluteGitRoot, repoIdFromGitRoot } from './workspace.ts'
 import { ensureDshPeers, DSH_PEERS } from './peers.ts'
 
 export const name = 'lumine-leyline'
 export const inject = ['agents', 'sessions']
 
 export type { Config } from './config.ts'
-export { resolveConfig, SOURCE_CLIENT_ID, DEFAULT_BASE_URL } from './config.ts'
+export {
+  resolveConfig,
+  SOURCE_CLIENT_ID,
+  DEFAULT_BASE_URL,
+  MEMORY_SOURCE_ID,
+  isAcpSession,
+} from './config.ts'
 export { CapabilityCache, parseCapabilities, supportsFeature, STANDALONE_CAPABILITIES } from './capabilities.ts'
 export {
   FEATURE_CONTEXT_PACK,
@@ -62,14 +74,18 @@ export {
   LIFECYCLE_SCHEMA,
   MATERIALIZE_SCHEMA,
 } from './payloads.ts'
-export { digestSession } from './digest.ts'
+export { digestSession, isWorthCapturing } from './digest.ts'
 export { isAbsoluteGitRoot, canonicalizeRepoId, repoIdFromGitRoot } from './workspace.ts'
+export { discoverLeyline, candidateBaseUrls, leylineHome } from './discover.ts'
+export { LeylineMemorySource } from './memory-source.ts'
+export type { MemorySource, MemoryRecallHit } from './memory-source.ts'
+export { recallUserMessage, recallPrompt, firstUserText } from './inject.ts'
 export { ensureDshPeers, DSH_PEERS }
 
 interface LiveSession {
-  packed: boolean
+  packedAt?: number
+  packedQuery?: string
   settled: boolean
-  packing: boolean
   recallIds: string[]
 }
 
@@ -87,33 +103,21 @@ function asAgent(...args: unknown[]): Agent | undefined {
 
 function payloadRecord(...args: unknown[]): Record<string, unknown> {
   for (const arg of args) {
-    if (arg && typeof arg === 'object' && !Array.isArray(arg)) return arg as Record<string, unknown>
+    if (arg && typeof arg === 'object' && !Array.isArray(arg) && !('session' in arg && 'id' in arg)) {
+      return arg as Record<string, unknown>
+    }
   }
   return {}
-}
-
-function userQuery(session: Session): string {
-  for (const event of session.events) {
-    if (event.type !== 'user/message') continue
-    const data = event.data as { message?: { content?: Array<{ type?: string; text?: string }> }; text?: string }
-    if (typeof data?.text === 'string' && data.text.trim()) return data.text.trim()
-    const blocks = data?.message?.content ?? []
-    const text = blocks
-      .filter(block => block.type === 'text' && typeof block.text === 'string')
-      .map(block => block.text as string)
-      .join('\n')
-      .trim()
-    if (text) return text
-  }
-  return workspaceQuery(session.header.cwd)
 }
 
 export class LumineLeylineHost extends Service {
   static inject = ['agents', 'sessions']
 
   readonly resolved: ResolvedConfig
-  readonly client: LeylineClient
+  client: LeylineClient
+  memorySource: LeylineMemorySource | undefined
   private readonly live = new Map<string, LiveSession>()
+  private ready: Promise<void>
 
   constructor(ctx: Context, options: ResolvedConfig & { client?: LeylineClient }) {
     super(ctx, 'lumineLeyline')
@@ -124,21 +128,26 @@ export class LumineLeylineHost extends Service {
       maxTokens: options.maxTokens,
       workspaceId: options.workspaceId,
       timeoutMs: options.timeoutMs,
+      autoRecall: options.autoRecall,
+      sessionEventCapture: options.sessionEventCapture,
+      spawnIfMissing: options.spawnIfMissing,
+      clientId: options.clientId,
     }
     this.client = options.client ?? new LeylineClient({
-      baseUrl: this.resolved.baseUrl,
+      baseUrl: this.resolved.baseUrl ?? 'http://127.0.0.1:6868',
       timeoutMs: this.resolved.timeoutMs,
     })
-    this.forget(this.client.probe())
+    this.ready = options.client ? this.client.probe().then(() => undefined) : this.attachDaemon()
+    this.forget(this.ready)
+    this.memorySource = new LeylineMemorySource(ctx, this)
+    ctx.memorySource = this.memorySource
     ctx.effect(() => {
-      const offStart = ctx.on('agent/session-start', (...args: unknown[]) => {
+      const offPre = ctx.on('agent/pre-step', (payload: unknown, next?: () => Promise<unknown> | unknown) => {
+        return this.onPreStep(payload, next)
+      }, { prepend: true })
+      const offStop = ctx.on('agent/turn-stopping', (...args: unknown[]) => {
         const agent = asAgent(...args)
-        if (agent) this.forget(this.onSessionStart(agent))
-      })
-      const offStatus = ctx.on('agent/status', (...args: unknown[]) => {
-        const agent = asAgent(...args)
-        const payload = payloadRecord(...args)
-        if (agent && payload.status === 'running') this.forget(this.onFirstPrompt(agent))
+        if (agent) this.forget(this.onSessionEnd(agent, args))
       })
       const offDisposed = ctx.on('agent/disposed', (...args: unknown[]) => {
         const agent = asAgent(...args)
@@ -151,9 +160,10 @@ export class LumineLeylineHost extends Service {
         this.forget(this.onWorktreeDeleted(payloadRecord(...args)))
       })
       const unwrap = this.wrapWorkspaceDelete(ctx)
+      this.registerThinTools(ctx)
       return () => {
-        offStart?.()
-        offStatus?.()
+        offPre?.()
+        offStop?.()
         offDisposed?.()
         offWorkspace?.()
         offWorktree?.()
@@ -169,124 +179,119 @@ export class LumineLeylineHost extends Service {
   private state(id: string): LiveSession {
     const existing = this.live.get(id)
     if (existing) return existing
-    const created: LiveSession = { packed: false, settled: false, packing: false, recallIds: [] }
+    const created: LiveSession = { settled: false, recallIds: [] }
     this.live.set(id, created)
     return created
   }
 
-  private async ensureFeatures(): Promise<void> {
-    if (!this.client.capabilities.ready) await this.client.probe()
+  private async attachDaemon(): Promise<void> {
+    const found = await discoverLeyline({
+      explicitBaseUrl: this.resolved.baseUrl,
+      timeoutMs: this.resolved.timeoutMs,
+      spawnIfMissing: this.resolved.spawnIfMissing,
+    })
+    if (found.baseUrl) {
+      this.client = new LeylineClient({
+        baseUrl: found.baseUrl,
+        timeoutMs: this.resolved.timeoutMs,
+      })
+    }
+    await this.client.probe()
   }
 
-  async onSessionStart(agent: Agent): Promise<void> {
+  async onPreStep(payload: unknown, next?: () => Promise<unknown> | unknown): Promise<unknown> {
+    const decision = next ? await next() : payload
+    const record = (decision && typeof decision === 'object' ? decision : payload) as {
+      kind?: string
+      messages?: Array<{ role?: string; source?: { kind?: string }; content?: Array<{ type?: string; text?: string }> }>
+      agent?: Agent
+    }
+    const incoming = payload && typeof payload === 'object' ? payload as { agent?: Agent; messages?: typeof record.messages } : {}
+    const agent = incoming.agent ?? record.agent
+    if (!this.resolved.autoRecall) return decision
+    if (!agent || record.kind === 'reject') return decision
+    if (isAcpSession(agent.session.header.agentPreset, agent.session.events)) return decision
+    const query = firstUserText(record.messages ?? incoming.messages ?? [])
+    if (query.length < MIN_RECALL_QUERY_CHARS) return decision
     try {
-      await this.ensureFeatures()
-      await this.recallAndMaybeMaterialize(agent)
+      await this.ready
+      const compiled = await this.recallFor(agent, query)
+      if (!compiled.text) return decision
+      const extra = recallUserMessage(recallPrompt(compiled.text))
+      const messages = [...(record.messages ?? incoming.messages ?? []), extra]
+      return { ...record, messages }
     } catch {
-      // Fire-and-forget: daemon-down stays silent and healthy.
+      return decision
     }
   }
 
-  async onFirstPrompt(agent: Agent): Promise<void> {
+  private async recallFor(agent: Agent, query: string): Promise<{ text: string; recallIds: string[] }> {
     const state = this.state(String(agent.id))
-    if (state.packed || state.packing) return
-    try {
-      await this.ensureFeatures()
-      await this.recallAndMaybeMaterialize(agent)
-    } catch {
-      // no-op
+    const now = Date.now()
+    if (state.packedAt && state.packedQuery === query && now - state.packedAt < RECALL_CACHE_MS) {
+      return { text: '', recallIds: state.recallIds }
     }
+    const cwd = agent.session.header.cwd
+    const repoId = cwd && isAbsoluteGitRoot(cwd) ? repoIdFromGitRoot(cwd) : undefined
+    const pack = await this.memorySource?.contextPack(query, repoId) as ContextPackResponse | undefined
+    const compiled = compileRecall(pack)
+    state.recallIds = compiled.recallIds
+    state.packedAt = now
+    state.packedQuery = query
+    if (
+      this.resolved.materialize
+      && this.client.capabilities.supports(FEATURE_MATERIALIZE)
+      && isAbsoluteGitRoot(cwd)
+    ) {
+      this.forget(this.client.post('/v1/materialize', buildMaterializeRequest({
+        path: cwd,
+        workspaceId: this.resolved.workspaceId,
+        repoId,
+      })))
+    }
+    return compiled
   }
 
-  async onSessionEnd(agent: Agent): Promise<void> {
+  async onSessionEnd(agent: Agent, rawArgs: unknown[] = []): Promise<void> {
+    if (!this.resolved.sessionEventCapture) return
+    const payload = payloadRecord(...rawArgs)
+    if (payload.cancelled === true || (payload.reason && payload.reason === 'cancelled')) return
     const id = String(agent.id)
     const state = this.state(id)
     if (state.settled) return
-    state.settled = true
     try {
-      await this.ensureFeatures()
-      if (!this.client.capabilities.supports(FEATURE_SESSION_EVENTS)) return
+      await this.ready
       const digest = digestSession(agent.session, state.recallIds)
-      const cwd = agent.session.header.cwd
-      const payload = buildSessionEventsPayload({
-        sourceSessionId: id,
+      if (!isWorthCapturing(digest)) return
+      state.settled = true
+      if (this.client.capabilities.supports(FEATURE_SESSION_EVENTS)) {
+        const cwd = agent.session.header.cwd
+        await this.client.post('/v1/session/events', buildSessionEventsPayload({
+          sourceSessionId: id,
+          workspaceId: this.resolved.workspaceId,
+          workspacePath: cwd,
+          repoId: cwd && isAbsoluteGitRoot(cwd) ? repoIdFromGitRoot(cwd) : undefined,
+          title: agent.session.header.agentPreset,
+          startedAt: digest.startedAt,
+          settledAt: digest.settledAt,
+          digest: digest.digest,
+          tail: digest.tail,
+          durationSeconds: digest.durationSeconds,
+          agent: digest.agent,
+          receipt: digest.receipt,
+          toolOutcomes: digest.toolOutcomes,
+        }))
+      }
+      this.forget(leylineRememberDreamer({
+        title: digest.goal ?? digest.summary ?? `session ${id}`,
+        body: digest.digest,
         workspaceId: this.resolved.workspaceId,
-        workspacePath: cwd,
-        repoId: cwd && isAbsoluteGitRoot(cwd) ? repoIdFromGitRoot(cwd) : undefined,
-        title: agent.session.header.agentPreset,
-        startedAt: digest.startedAt,
-        settledAt: digest.settledAt,
-        digest: digest.digest,
-        tail: digest.tail,
-        durationSeconds: digest.durationSeconds,
-        agent: digest.agent,
-        receipt: digest.receipt,
-        toolOutcomes: digest.toolOutcomes,
-      })
-      await this.client.post('/v1/session/events', payload)
+        cwd: agent.session.header.cwd,
+      }))
     } catch {
       // no-op
     } finally {
-      this.live.delete(id)
-    }
-  }
-
-  private async recallAndMaybeMaterialize(agent: Agent): Promise<void> {
-    const state = this.state(String(agent.id))
-    if (state.packed || state.packing) return
-    state.packing = true
-    try {
-      const cwd = agent.session.header.cwd
-      const repoId = cwd && isAbsoluteGitRoot(cwd) ? repoIdFromGitRoot(cwd) : undefined
-      if (this.client.capabilities.supports(FEATURE_CONTEXT_PACK)) {
-        const request = buildContextPackRequest({
-          query: userQuery(agent.session),
-          workspaceId: this.resolved.workspaceId,
-          repoId,
-          maxMemories: this.resolved.maxMemories,
-          maxTokens: this.resolved.maxTokens,
-        })
-        const pack = await this.client.post('/v1/context-pack', request) as ContextPackResponse | undefined
-        const compiled = compileRecall(pack)
-        state.recallIds = compiled.recallIds
-        this.tryHiddenHostContext(agent, compiled.text)
-      }
-      if (
-        this.resolved.materialize
-        && this.client.capabilities.supports(FEATURE_MATERIALIZE)
-        && isAbsoluteGitRoot(cwd)
-      ) {
-        await this.client.post('/v1/materialize', buildMaterializeRequest({
-          path: cwd,
-          workspaceId: this.resolved.workspaceId,
-          repoId,
-        }))
-      }
-      state.packed = true
-    } finally {
-      state.packing = false
-    }
-  }
-
-  /**
-   * ACP sessions replace agent-loop; the official child owns tools and never
-   * sees `ctx.systemPrompt` or `agent/pre-step` inbox splices. Registering a
-   * prompt section is the native-loop seam when that service exists. It is
-   * not a second agent-loop and it is not a user bubble. ACP v1 injection is
-   * opt-in materialize of `.leyline/LESSONS.md`.
-   */
-  private tryHiddenHostContext(agent: Agent, text: string): void {
-    if (!text) return
-    const systemPrompt = agent.ctx.get('systemPrompt') as Context['systemPrompt'] | undefined
-      ?? this.ctx.get('systemPrompt') as Context['systemPrompt'] | undefined
-    try {
-      systemPrompt?.section({
-        name: 'lumine-leyline-recall',
-        order: 40,
-        text,
-      })
-    } catch {
-      // Missing or inactive service — degrade. Capture still happens.
+      if (state.settled) this.live.delete(id)
     }
   }
 
@@ -296,7 +301,7 @@ export class LumineLeylineHost extends Service {
     worktreePath?: string
   } = {}): Promise<void> {
     try {
-      await this.ensureFeatures()
+      await this.ready
       if (!this.client.capabilities.supports(FEATURE_LIFECYCLE)) return
       await this.client.post('/v1/lifecycle', buildLifecycleEvent({
         kind,
@@ -345,15 +350,38 @@ export class LumineLeylineHost extends Service {
     }
     return () => { registry.delete = original }
   }
+
+  /**
+   * Prefer `leyline serve --stdio` via dsh-mcp-client. Only register four thin
+   * tools when no MCP client is mounted.
+   */
+  private registerThinTools(ctx: Context): void {
+    const mcp = ctx.get('mcp') ?? ctx.get('mcpClient') ?? ctx.get('mcpServers')
+    if (mcp) return
+    const tools = ctx.get('tools') as {
+      register?: (tool: unknown) => unknown
+      define?: (tool: unknown) => unknown
+    } | undefined
+    const register = tools?.register ?? tools?.define
+    if (typeof register !== 'function') return
+    const source = this.memorySource
+    if (!source) return
+    for (const tool of [
+      { name: 'leyline_recall', description: 'Recall memories from Leyline.', execute: (input: { query?: string }) => source.recall(String(input.query ?? '')) },
+      { name: 'leyline_remember', description: 'Stage a Leyline dreamer note.', execute: (input: { title?: string; body?: string }) => source.remember({ title: String(input.title ?? 'note'), body: String(input.body ?? '') }) },
+      { name: 'leyline_mark_useful', description: 'Mark a Leyline recall useful.', execute: (input: { recallId?: string }) => source.markUseful(String(input.recallId ?? '')) },
+      { name: 'leyline_context', description: 'Compiled Leyline context pack.', execute: (input: { query?: string }) => source.contextPack(String(input.query ?? '')) },
+    ]) {
+      try {
+        register(tool)
+      } catch {
+        // Host tool surface unavailable.
+      }
+    }
+  }
 }
 
 export function apply(ctx: Context, config: Config = {}): void {
   const resolved = resolveConfig(config)
   ctx.plugin(LumineLeylineHost, resolved)
-}
-
-export default {
-  name,
-  inject,
-  apply,
 }

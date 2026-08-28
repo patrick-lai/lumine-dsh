@@ -48,16 +48,7 @@
     "max_tool_preview_chars": 4096
   },
   "extensions": {
-    "dsh": {
-      "adapter": 1,
-      "receipt": {
-        "result": "success",
-        "label": "success · tests green",
-        "recall_ids": ["recall_abc123"],
-        "diff_stat": "+18 -4"
-      }
-    },
-    "lumine": {
+    "lumine-dsh": {
       "adapter": 1,
       "receipt": {
         "result": "success",

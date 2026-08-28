@@ -16,11 +16,12 @@ declare module '@deepseek-ai/cordis' {
       delete(id: string): Promise<boolean>
       get(id: string): { id: string; path: string } | undefined
     }
+    memorySource?: unknown
     get<T = unknown>(name: string): T | undefined
     effect(fn: () => (() => unknown) | void, label?: string): () => Promise<void> | void
     plugin(plugin: unknown, config?: unknown): { ctx: Context; dispose: () => Promise<void> | void }
     inject(deps: string[], callback: (ctx: Context) => void): { dispose: () => Promise<void> | void }
-    on(event: string, listener: (...args: unknown[]) => unknown): () => void
+    on(event: string, listener: (...args: unknown[]) => unknown, options?: { prepend?: boolean }): () => void
   }
 
   export class Service {

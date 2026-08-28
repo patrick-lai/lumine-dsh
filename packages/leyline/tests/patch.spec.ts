@@ -14,6 +14,8 @@ describe('Leyline bundle cordis overlay', () => {
       expect(source).toMatch(/id:\s*lumine-leyline/)
       expect(source).toMatch(/name:\s*'@lumine\/dsh-leyline'/)
       expect(source).toMatch(/materialize:\s*false/)
+      expect(source).toMatch(/spawnIfMissing:\s*true/)
+      expect(source).toMatch(/autoRecall:\s*true/)
       expect(source).not.toMatch(/id:\s*llm-deepseek[\s\S]*disabled:\s*true/)
       expect(source).not.toMatch(/apiKeyEnv:\s*DEEPSEEK_API_KEY/)
     }
