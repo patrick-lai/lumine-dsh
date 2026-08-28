@@ -18,7 +18,12 @@ import { mountAcpCatalog } from './models.ts'
 import { installPickerPresets } from './presets.ts'
 
 export const name = 'lumine-acp-session'
-export const inject = ['agents', 'sessions', 'llm']
+/**
+ * Plugin-root inject. Factory `static inject` is the child-setup fiber
+ * (`createScope` inherits the minter). Both must list `systemPrompt` —
+ * nested Cordis inject is exclusive (r9 path C).
+ */
+export const inject = ['agents', 'sessions', 'llm', 'systemPrompt']
 
 export type { Config, PermissionMode, ProviderOverride } from './config.ts'
 export { resolveConfig } from './config.ts'

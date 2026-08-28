@@ -114,7 +114,16 @@ async function raceAbortCall<T>(
 }
 
 export class LumineAcpFactory extends Service implements AgentFactory {
-  static inject = ['agents', 'sessions', 'llm']
+  /**
+   * Official `@deepseek-ai/dsh-agent-loop` is
+   * `['agents', 'sessions', 'llm', 'tools', 'systemPrompt']`.
+   * We keep the existing factory set and add `systemPrompt` so published
+   * `applyChildComposition` can `childCtx.systemPrompt.context()` /
+   * `section()` on the ACP child setup fiber. `createScope(loopCtx)`
+   * inherits this minter's inject — harvest/startCtx cannot grant it
+   * (r9). Do not invent a new `start()` API.
+   */
+  static inject = ['agents', 'sessions', 'llm', 'systemPrompt']
 
   readonly resolved: ResolvedConfig
   private readonly ownership: FactoryOwnership
