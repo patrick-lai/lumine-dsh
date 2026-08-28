@@ -1,0 +1,27 @@
+import { readFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+
+function patch(relative: string): string {
+  return readFileSync(new URL(relative, import.meta.url), 'utf8')
+}
+
+const root = patch('../../../cordis.patch.yml')
+const pkg = patch('../cordis.patch.yml')
+
+describe('goal-completion cordis overlay', () => {
+  it('inserts lumine-goal-completion from the root bundle', () => {
+    expect(root).toMatch(/id:\s*lumine-goal-completion/)
+    expect(root).toMatch(/name:\s*'@lumine\/dsh-goal-completion'/)
+    expect(root).toMatch(/timeoutMs:\s*900000/)
+    expect(root).toMatch(/failClosed:\s*true/)
+    expect(root).toMatch(/id:\s*lumine-acp-session/)
+    expect(root).not.toMatch(/DEEPSEEK_API_KEY/)
+  })
+
+  it('keeps a one-by-one package overlay that does not re-insert ACP browse', () => {
+    expect(pkg).toMatch(/id:\s*lumine-goal-completion/)
+    expect(pkg).toMatch(/name:\s*'@lumine\/dsh-goal-completion'/)
+    expect(pkg).not.toMatch(/id:\s*directory-picker-browse/)
+    expect(pkg).not.toMatch(/id:\s*lumine-acp-session/)
+  })
+})

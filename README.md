@@ -2,7 +2,10 @@
 
 Lumine capabilities as [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins. This repository is the install home: `dsh plugin --profile web add github:patrick-lai/lumine-dsh` gets everything. Packages inside can also be installed one-by-one later.
 
-**Today that is one plugin:** `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
+**Today that is two plugins:**
+
+- `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
+- `@lumine/dsh-goal-completion` — the deferred DSH completion policy layer. A worker `update_goal` complete (or an ACP `GOAL REACHED` marker) is only a candidate until an isolated judge outputs `GOAL COMPLETION VERDICT: APPROVED`. Human `/goal` and RPC `goal.complete` stay operator-authoritative. Marker harvest + hidden continue nudges mount only on lumine ACP presets and never beside `dsh-goal-round-driver`.
 
 Keyword for discovery: `dsh-plugin`.
 
@@ -114,6 +117,8 @@ A missing CLI fails with `Install X and log in`, not a stack trace.
 
 ## Config
 
+Root `cordis.patch.yml` also inserts `lumine-goal-completion` (`timeoutMs: 900000`, `failClosed: true`, optional `judgePreset`). In CI the judge is a fake that never approves. Generation of the runtime judge never writes a DeepSeek key.
+
 `cordis.patch.yml` / profile overlay on `id: lumine-acp-session`:
 
 ```yaml
@@ -145,6 +150,8 @@ lumine-dsh/                      # root bundle (dsh.bundle)
   packages/acp-session/          # @lumine/dsh-acp-session (dsh.bundle)
     src/                         # factory, ACP client, event map, command resolution
     presets/                     # four picker rows, no DSH tools
+  packages/goal-completion/      # @lumine/dsh-goal-completion (dsh.bundle)
+    src/                         # certifier, update_goal wrap, ACP marker fallback
 ```
 
 ## Develop

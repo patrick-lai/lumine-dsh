@@ -1,0 +1,16 @@
+# One-by-one install of @lumine/dsh-goal-completion.
+#
+# The root lumine-dsh bundle already inserts this plugin. Do not repeat that
+# insert in a profile overlay if the root bundle already did — a second insert
+# is a duplicate loader id.
+#
+# This is the deferred DSH completion policy layer: a worker complete is only
+# a candidate until an independent judge approves. Human /goal and RPC
+# goal.complete stay operator-authoritative and are not wrapped.
+
+- insert:
+    - id: lumine-goal-completion
+      name: '@lumine/dsh-goal-completion'
+      config:
+        timeoutMs: 900000
+        failClosed: true

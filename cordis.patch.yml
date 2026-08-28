@@ -10,6 +10,15 @@
       config:
         permission: yolo
         defaultProvider: claude
+    # Deferred DSH completion policy. Wraps worker update_goal complete;
+    # ACP marker harvest mounts only on lumine ACP sessions and never
+    # beside dsh-goal-round-driver. Human /goal and RPC goal.complete
+    # stay operator-authoritative.
+    - id: lumine-goal-completion
+      name: '@lumine/dsh-goal-completion'
+      config:
+        timeoutMs: 900000
+        failClosed: true
 
 # Pin the in-page browse directory picker. directory-picker-auto picks native on
 # darwin; a detached `dsh` never shows the macOS dialog, so "+ Add workspace"

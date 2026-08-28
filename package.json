@@ -1,7 +1,7 @@
 {
   "name": "lumine-dsh",
   "version": "0.1.0",
-  "description": "Lumine capabilities as DeepSeek Harness plugins. ACP sessions for Claude Code, Codex, Cursor, and Grok Build.",
+  "description": "Lumine capabilities as DeepSeek Harness plugins. ACP sessions for Claude Code, Codex, Cursor, and Grok Build, plus fail-closed /goal completion.",
   "license": "MIT",
   "type": "module",
   "private": false,
@@ -31,7 +31,11 @@
     "packages/acp-session/cordis.patch.yml",
     "packages/acp-session/lib",
     "packages/acp-session/presets",
-    "packages/acp-session/scripts"
+    "packages/acp-session/scripts",
+    "packages/goal-completion/package.json",
+    "packages/goal-completion/cordis.patch.yml",
+    "packages/goal-completion/lib",
+    "packages/goal-completion/scripts"
   ],
   "exports": {
     "./cordis.patch.yml": "./cordis.patch.yml",
@@ -43,11 +47,12 @@
     }
   },
   "scripts": {
-    "prepare": "pnpm --dir packages/acp-session run build:prepare",
-    "build": "pnpm --filter @lumine/dsh-acp-session run build",
-    "test": "pnpm --filter @lumine/dsh-acp-session run test"
+    "prepare": "pnpm --dir packages/acp-session run build:prepare && pnpm --dir packages/goal-completion run build:prepare",
+    "build": "pnpm --filter @lumine/dsh-acp-session --filter @lumine/dsh-goal-completion run build",
+    "test": "pnpm --filter @lumine/dsh-acp-session --filter @lumine/dsh-goal-completion run test"
   },
   "dependencies": {
-    "@lumine/dsh-acp-session": "file:packages/acp-session"
+    "@lumine/dsh-acp-session": "file:packages/acp-session",
+    "@lumine/dsh-goal-completion": "file:packages/goal-completion"
   }
 }
