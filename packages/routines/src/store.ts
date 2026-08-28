@@ -196,10 +196,10 @@ export class RoutineStore {
       ...result.note ? { note: result.note } : {},
       ...result.missedCount ? { missedCount: result.missedCount } : {},
     }
+    const { activeRun: _drop, ...cleared } = current
     if (result.ok) {
       const committed: Routine = {
-        ...current,
-        activeRun: undefined,
+        ...cleared,
         lastRunAt: now,
         runCount: current.runCount + 1,
         deliveryFailures: 0,
@@ -214,9 +214,8 @@ export class RoutineStore {
 
     const failures = current.deliveryFailures + 1
     const exhausted = failures >= MAX_DELIVERY_FAILURES
-    const failed: Routine = {
-      ...current,
-      activeRun: undefined,
+    const failed: Routine = omitUndefined({
+      ...cleared,
       deliveryFailures: exhausted ? 0 : failures,
       ...exhausted ? { lastRunAt: now } : {},
       runs: [...current.runs, {
@@ -226,7 +225,7 @@ export class RoutineStore {
           : `${result.note ?? 'delivery failed'}; retry ${failures}/${MAX_DELIVERY_FAILURES}`,
       }].slice(-RUN_HISTORY_CAP),
       updatedAt: now,
-    }
+    })
     const routine = exhausted ? withNextRun(failed, now) : failed
     this.routines.set(id, routine)
     await this.flush()

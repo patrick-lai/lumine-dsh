@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { missedFireCount } from '../src/calendar.ts'
 import { filePersist } from '../src/persist.ts'
 import { RoutineStore } from '../src/store.ts'
+import { snapshotJsonValue } from './snapshot-json.ts'
 
 describe('catch-up fires exactly once', () => {
   it('claims one launch after a multi-slot gap and advances nextRun past now on finish', async () => {
@@ -65,6 +66,9 @@ describe('catch-up fires exactly once', () => {
       const failed = await store.finishFire(created.id, claimed.activeRunId, { ok: false, note: 'no agents' })
       expect(failed.deliveryFailures).toBe(index)
       expect(failed.lastRunAt).toBeUndefined()
+      expect('activeRun' in failed).toBe(false)
+      expect(snapshotJsonValue(failed)).toEqual(failed)
+      expect(snapshotJsonValue({ routines: store.list() })).toEqual({ routines: store.list() })
     }
 
     const third = await store.claimFire(created.id, new Date('2026-01-01T00:01:00Z'), { force: true })
