@@ -164,7 +164,7 @@ Permission default is **yolo** (`allow_always` / `--always-approve` / bypass whe
     materializeLessons: false        # opt-in write of <git-root>/.leyline/LESSONS.md
 ```
 
-Fire-and-forget. If the daemon is down the plugin stays silent and healthy. Prefer `leyline serve --stdio` via `dsh-mcp-client` (`LEYLINE_HOME=~/.leyline`). ACP children skip host-side recall injection (they already have MCP); events are still captured. See [packages/leyline/README.md](packages/leyline/README.md).
+Fire-and-forget. If the daemon is down the plugin stays silent and healthy. Prefer `leyline serve --stdio` via `dsh-mcp-client` (`serverName: leyline`, `LEYLINE_HOME=~/.leyline`). ACP children skip host-side recall injection (they already have MCP); events are still captured. See [packages/leyline/README.md](packages/leyline/README.md).
 
 ## Layout
 

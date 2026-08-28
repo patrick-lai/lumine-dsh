@@ -267,6 +267,74 @@ describe('plugin apply', () => {
     expect(posts.some(entry => entry.path.endsWith('/v1/context-pack'))).toBe(false)
   })
 
+  it('settles on disposed, not intermediate turn-stopping', () => {
+    const listeners: Record<string, Array<(...args: unknown[]) => unknown>> = {}
+    new LumineLeylineHost(hostCtx(listeners) as never, {
+      ...resolveConfig({ spawnIfMissing: false }),
+      timeoutMs: 1000,
+      client: liveClient([]),
+    })
+    expect(listeners['agent/turn-stopping']).toBeUndefined()
+    expect(listeners['agent/disposed']?.length).toBe(1)
+  })
+
+  it('skips settlement when the last turn/end is cancelled', async () => {
+    const posts: Array<{ path: string; body: unknown }> = []
+    const host = new LumineLeylineHost(hostCtx({}) as never, {
+      ...resolveConfig({ spawnIfMissing: false }),
+      timeoutMs: 1000,
+      client: liveClient(posts),
+    })
+    const agent = agentFor(session('sess-cancel', {
+      events: [
+        {
+          type: 'user/message',
+          data: { message: { content: [{ type: 'text', text: 'hello there' }] } },
+        },
+        { type: 'assistant/message', data: { text: 'working' } },
+        { type: 'turn/end', data: { reason: { kind: 'cancelled' } } },
+      ],
+    }))
+    await host.onSessionEnd(agent as never)
+    expect(posts.some(entry => entry.path.endsWith('/v1/session/events'))).toBe(false)
+  })
+
+  it('gates Leyline MCP only on mcp__leyline__* tools, not any ctx.get(mcp)', () => {
+    const ctx = {
+      ...hostCtx({}),
+      get(name: string) {
+        if (name === 'mcp') return { servers: ['other'] }
+        return undefined
+      },
+    }
+    expect(hasLeylineMcp(ctx as never)).toBe(false)
+  })
+
+  it('thin leyline_recall passes repoId through to memorySource.recall', async () => {
+    const registered: Array<{ name: string; execute: (input: { query?: string; repoId?: string }) => Promise<unknown> }> = []
+    const ctx = {
+      ...hostCtx({}),
+      get(name: string) {
+        if (name === 'tools') return { register: (tool: { name: string; execute: (input: { query?: string; repoId?: string }) => Promise<unknown> }) => { registered.push(tool) } }
+        return undefined
+      },
+    }
+    const host = new LumineLeylineHost(ctx as never, {
+      ...resolveConfig({ spawnIfMissing: false }),
+      timeoutMs: 1000,
+      client: liveClient([]),
+    })
+    const recalled: Array<{ query: string; repoId?: string }> = []
+    host.memorySource!.recall = async (query, _limit, repoId) => {
+      recalled.push({ query, repoId })
+      return []
+    }
+    const tool = registered.find(entry => entry.name === 'leyline_recall')
+    expect(tool).toBeDefined()
+    await tool!.execute({ query: 'flaky test', repoId: 'acme/repo' })
+    expect(recalled).toEqual([{ query: 'flaky test', repoId: 'acme/repo' }])
+  })
+
   it('does not register thin tools when Leyline MCP is already mounted', () => {
     const registered: unknown[] = []
     const ctx = {

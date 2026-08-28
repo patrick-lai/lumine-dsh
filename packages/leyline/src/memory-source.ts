@@ -22,7 +22,7 @@ export interface MemorySource {
   health(): Promise<boolean>
   supports(feature: string): boolean
   recall(query: string, limit?: number): Promise<MemoryRecallHit[]>
-  remember(input: { title: string; body: string }): Promise<boolean>
+  remember(input: { title: string; body: string; repoId?: string }): Promise<boolean>
   markUseful(recallId: string, memoryIds?: string[]): Promise<boolean>
   contextPack(query: string, repoId?: string): Promise<ContextPackResponse | undefined>
 }
@@ -77,16 +77,20 @@ export class LeylineMemorySource extends Service implements MemorySource {
         })
         return await this.client.post('/v1/context-pack', request) as ContextPackResponse | undefined
       }
-      const fallback = await leylineRecallJson(query)
+      const fallback = await leylineRecallJson(query, {
+        workspaceId: this.config.workspaceId,
+        repoId,
+        maxMemories: this.config.maxMemories,
+      })
       return fallback as ContextPackResponse | undefined
     } catch {
       return undefined
     }
   }
 
-  async recall(query: string, limit = 4): Promise<MemoryRecallHit[]> {
+  async recall(query: string, limit = 4, repoId?: string): Promise<MemoryRecallHit[]> {
     try {
-      const pack = await this.contextPack(query)
+      const pack = await this.contextPack(query, repoId)
       const compiled = compileRecall(pack)
       const memories = pack?.memories ?? []
       return memories.slice(0, limit).map((memory, index) => ({
@@ -100,12 +104,13 @@ export class LeylineMemorySource extends Service implements MemorySource {
     }
   }
 
-  async remember(input: { title: string; body: string }): Promise<boolean> {
+  async remember(input: { title: string; body: string; repoId?: string }): Promise<boolean> {
     try {
       return await leylineRememberDreamer({
         title: input.title,
         body: input.body,
         workspaceId: this.config.workspaceId,
+        repoId: input.repoId,
       })
     } catch {
       return false

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { digestSession, isWorthCapturing } from '../src/digest.ts'
+import { digestSession, isWorthCapturing, shouldSkipSettle } from '../src/digest.ts'
 import { settleIdempotencyKey } from '../src/payloads.ts'
 import type { Session } from '@deepseek-ai/dsh-session'
 
@@ -59,5 +59,20 @@ describe('session digest', () => {
         data: { message: { content: [{ type: 'text', text: 'hello there' }] } },
       },
     ])))).toBe(true)
+  })
+
+  it('skips settle when the last turn/end is aborted, interrupted, or cancelled', () => {
+    for (const kind of ['aborted', 'interrupted', 'cancelled']) {
+      expect(shouldSkipSettle(session([
+        {
+          type: 'user/message',
+          data: { message: { content: [{ type: 'text', text: 'hello there' }] } },
+        },
+        { type: 'turn/end', data: { reason: { kind } } },
+      ]))).toBe(true)
+    }
+    expect(shouldSkipSettle(session([
+      { type: 'turn/end', data: { reason: { kind: 'completed' } } },
+    ]))).toBe(false)
   })
 })

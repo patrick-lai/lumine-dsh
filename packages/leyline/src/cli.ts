@@ -1,6 +1,9 @@
 /**
- * Thin wrappers around the `leyline` CLI. Used as a fallback when an HTTP
- * feature is missing, and for `leyline remember --stage dreamer`.
+ * Thin wrappers around the live `leyline` CLI.
+ *
+ * Argv is pinned to clap in leyline-agent-memory `RememberArgs` / `RecallArgs`:
+ * `remember` requires `--title` and `--body` (stdin is not a body source).
+ * `recall` requires `--query` (not a positional).
  */
 
 import { spawn } from 'node:child_process'
@@ -29,10 +32,43 @@ export function resolveLeylineBinary(env: NodeJS.ProcessEnv = process.env): stri
 export interface RunLeylineOptions {
   args: string[]
   cwd?: string
-  stdin?: string
   env?: NodeJS.ProcessEnv
   timeoutMs?: number
   spawnImpl?: typeof spawn
+}
+
+/** Live `leyline remember --help`: --title and --body are required. --lane is shown. */
+export function rememberDreamerArgs(input: {
+  title: string
+  body: string
+  workspaceId: string
+  repoId?: string
+  lane?: string
+}): string[] {
+  const args = [
+    'remember',
+    '--stage', 'dreamer',
+    '--title', input.title,
+    '--body', input.body,
+    '--workspace-id', input.workspaceId,
+    '--lane', input.lane?.trim() || 'repo',
+  ]
+  if (input.repoId) args.push('--repo-id', input.repoId)
+  return args
+}
+
+/** Live `leyline recall --help`: --query is required, not a positional. */
+export function recallJsonArgs(input: {
+  query: string
+  workspaceId?: string
+  repoId?: string
+  maxMemories?: number
+}): string[] {
+  const args = ['recall', '--query', input.query, '--json']
+  if (input.workspaceId) args.push('--workspace-id', input.workspaceId)
+  if (input.repoId) args.push('--repo-id', input.repoId)
+  if (input.maxMemories !== undefined) args.push('--max-memories', String(input.maxMemories))
+  return args
 }
 
 export function runLeyline(options: RunLeylineOptions): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -43,7 +79,7 @@ export function runLeyline(options: RunLeylineOptions): Promise<{ code: number; 
     const child = (options.spawnImpl ?? spawn)(binary, options.args, {
       cwd: options.cwd,
       env: { ...env, LEYLINE_HOME: leylineHome(env) },
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
     let stdout = ''
     let stderr = ''
@@ -61,8 +97,6 @@ export function runLeyline(options: RunLeylineOptions): Promise<{ code: number; 
       clearTimeout(timer)
       resolve({ code: 127, stdout, stderr })
     })
-    if (options.stdin) child.stdin?.end(options.stdin)
-    else child.stdin?.end()
   })
 }
 
@@ -70,12 +104,22 @@ export async function leylineRecallJson(query: string, options: {
   cwd?: string
   env?: NodeJS.ProcessEnv
   timeoutMs?: number
+  workspaceId?: string
+  repoId?: string
+  maxMemories?: number
+  spawnImpl?: typeof spawn
 } = {}): Promise<unknown | undefined> {
   const result = await runLeyline({
-    args: ['recall', '--json', query],
+    args: recallJsonArgs({
+      query,
+      workspaceId: options.workspaceId,
+      repoId: options.repoId,
+      maxMemories: options.maxMemories,
+    }),
     cwd: options.cwd,
     env: options.env,
     timeoutMs: options.timeoutMs,
+    spawnImpl: options.spawnImpl,
   })
   if (result.code !== 0 || !result.stdout.trim()) return undefined
   try {
@@ -89,14 +133,17 @@ export async function leylineRememberDreamer(input: {
   title: string
   body: string
   workspaceId: string
+  repoId?: string
+  lane?: string
   cwd?: string
   env?: NodeJS.ProcessEnv
+  spawnImpl?: typeof spawn
 }): Promise<boolean> {
   const result = await runLeyline({
-    args: ['remember', '--stage', 'dreamer', '--title', input.title, '--workspace-id', input.workspaceId],
+    args: rememberDreamerArgs(input),
     cwd: input.cwd,
-    stdin: input.body,
     env: input.env,
+    spawnImpl: input.spawnImpl,
   })
   return result.code === 0
 }

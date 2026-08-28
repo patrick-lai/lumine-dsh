@@ -26,7 +26,7 @@ import {
   type Config,
   type ResolvedConfig,
 } from './config.ts'
-import { digestSession, isWorthCapturing } from './digest.ts'
+import { digestSession, isWorthCapturing, shouldSkipSettle } from './digest.ts'
 import { discoverLeyline } from './discover.ts'
 import { firstUserText, insertAfterFirstUser, recallPrompt, recallUserMessage } from './inject.ts'
 import { LeylineMemorySource } from './memory-source.ts'
@@ -74,7 +74,8 @@ export {
   LIFECYCLE_SCHEMA,
   MATERIALIZE_SCHEMA,
 } from './payloads.ts'
-export { digestSession, isWorthCapturing } from './digest.ts'
+export { digestSession, isWorthCapturing, shouldSkipSettle, lastTurnEndKind } from './digest.ts'
+export { rememberDreamerArgs, recallJsonArgs, leylineRememberDreamer, leylineRecallJson } from './cli.ts'
 export { isAbsoluteGitRoot, canonicalizeRepoId, repoIdFromGitRoot, findGitRoot, repoIdFromCwd } from './workspace.ts'
 export { discoverLeyline, candidateBaseUrls, leylineHome } from './discover.ts'
 export { LeylineMemorySource } from './memory-source.ts'
@@ -129,18 +130,22 @@ function listedToolNames(tools: ToolRegistry | undefined): string[] {
 
 /** True when Leyline is already on the host via dsh-mcp-client (`mcp__leyline__*`). */
 export function hasLeylineMcp(ctx: Context, tools?: ToolRegistry): boolean {
-  if (ctx.get('mcp') || ctx.get('mcpClient') || ctx.get('mcpServers')) return true
   const registry = tools
     ?? (ctx as { tools?: ToolRegistry }).tools
     ?? ctx.get('tools') as ToolRegistry | undefined
   if (typeof registry?.has === 'function') {
     if (registry.has('mcp__leyline__recall') || registry.has('mcp__leyline__remember')) return true
   }
-  return listedToolNames(registry).some(name =>
-    name.startsWith('mcp__leyline__')
-    || name === 'leyline_recall'
-    || name === 'leyline_remember',
-  )
+  return listedToolNames(registry).some(name => name.startsWith('mcp__leyline__'))
+}
+
+function currentRepoId(ctx: Context): string | undefined {
+  const listed = ctx.agents?.list?.() ?? []
+  for (const agent of listed) {
+    const repoId = repoIdFromCwd(agent.session?.header?.cwd)
+    if (repoId) return repoId
+  }
+  return undefined
 }
 
 function payloadRecord(...args: unknown[]): Record<string, unknown> {
@@ -187,13 +192,9 @@ export class LumineLeylineHost extends Service {
       const offPre = ctx.on('agent/pre-step', (payload: unknown, next?: () => Promise<unknown> | unknown) => {
         return this.onPreStep(payload, next)
       }, { prepend: true })
-      const offStop = ctx.on('agent/turn-stopping', (...args: unknown[]) => {
-        const agent = asAgent(...args)
-        if (agent) this.forget(this.onSessionEnd(agent, args))
-      })
       const offDisposed = ctx.on('agent/disposed', (...args: unknown[]) => {
         const agent = asAgent(...args)
-        if (agent) this.forget(this.onSessionEnd(agent))
+        if (agent) this.forget(this.onSessionEnd(agent, args))
       })
       const offWorkspace = ctx.on('host/workspace-removed', (...args: unknown[]) => {
         this.forget(this.onWorkspaceRemoved(payloadRecord(...args)))
@@ -205,7 +206,6 @@ export class LumineLeylineHost extends Service {
       this.registerThinTools(ctx)
       return () => {
         offPre?.()
-        offStop?.()
         offDisposed?.()
         offWorkspace?.()
         offWorktree?.()
@@ -304,22 +304,31 @@ export class LumineLeylineHost extends Service {
     if (!this.resolved.sessionEventCapture) return
     const payload = payloadRecord(...rawArgs)
     const signal = payload.signal as AbortSignal | undefined
-    if (payload.cancelled === true || payload.reason === 'cancelled' || signal?.aborted) return
     const id = String(agent.id)
     const state = this.state(id)
     if (state.settled) return
+    if (
+      payload.cancelled === true
+      || payload.reason === 'cancelled'
+      || signal?.aborted
+      || shouldSkipSettle(agent.session)
+    ) {
+      this.live.delete(id)
+      return
+    }
     try {
       await this.ready
       const digest = digestSession(agent.session, state.recallIds)
       if (!isWorthCapturing(digest)) return
       state.settled = true
+      const cwd = agent.session.header.cwd
+      const repoId = repoIdFromCwd(cwd)
       if (this.client.capabilities.supports(FEATURE_SESSION_EVENTS)) {
-        const cwd = agent.session.header.cwd
         await this.client.post('/v1/session/events', buildSessionEventsPayload({
           sourceSessionId: id,
           workspaceId: this.resolved.workspaceId,
           workspacePath: cwd,
-          repoId: repoIdFromCwd(cwd),
+          repoId,
           title: agent.session.header.agentPreset,
           startedAt: digest.startedAt,
           settledAt: digest.settledAt,
@@ -335,7 +344,8 @@ export class LumineLeylineHost extends Service {
         title: digest.goal ?? digest.summary ?? `session ${id}`,
         body: digest.digest,
         workspaceId: this.resolved.workspaceId,
-        cwd: agent.session.header.cwd,
+        repoId,
+        cwd,
       }))
     } catch {
       // no-op
@@ -411,11 +421,13 @@ export class LumineLeylineHost extends Service {
     if (typeof register !== 'function') return
     const source = this.memorySource
     if (!source) return
+    const repoIdOf = (input: { repoId?: string } = {}): string | undefined =>
+      input.repoId || currentRepoId(ctx)
     for (const tool of [
-      { name: 'leyline_recall', description: 'Recall memories from Leyline.', execute: (input: { query?: string }) => source.recall(String(input.query ?? '')) },
-      { name: 'leyline_remember', description: 'Stage a Leyline dreamer note.', execute: (input: { title?: string; body?: string }) => source.remember({ title: String(input.title ?? 'note'), body: String(input.body ?? '') }) },
+      { name: 'leyline_recall', description: 'Recall memories from Leyline.', execute: (input: { query?: string; repoId?: string }) => source.recall(String(input.query ?? ''), this.resolved.maxMemories, repoIdOf(input)) },
+      { name: 'leyline_remember', description: 'Stage a Leyline dreamer note.', execute: (input: { title?: string; body?: string; repoId?: string }) => source.remember({ title: String(input.title ?? 'note'), body: String(input.body ?? ''), repoId: repoIdOf(input) }) },
       { name: 'leyline_mark_useful', description: 'Mark a Leyline recall useful.', execute: (input: { recallId?: string }) => source.markUseful(String(input.recallId ?? '')) },
-      { name: 'leyline_context', description: 'Compiled Leyline context pack.', execute: (input: { query?: string }) => source.contextPack(String(input.query ?? '')) },
+      { name: 'leyline_context', description: 'Compiled Leyline context pack.', execute: (input: { query?: string; repoId?: string }) => source.contextPack(String(input.query ?? ''), repoIdOf(input)) },
     ]) {
       try {
         register(tool)

@@ -14,6 +14,8 @@
 # Leyline host adapter. Discover a running daemon (LEYLINE_BASE_URL →
 # ~/.leyline/daemon.json → :6868 → :7893), then attach-or-spawn. Fire-and-forget.
 # Do not disable agent-loop here — acp-session already does.
+# When rebasing root files later, keep both lumine-leyline and
+# lumine-goal-completion insert rows.
 - insert:
     - id: lumine-leyline
       name: '@lumine/dsh-leyline'

@@ -152,3 +152,18 @@ export function digestSession(session: Session, recallIds: string[] = []): Sessi
 export function isWorthCapturing(digest: SessionDigest): boolean {
   return Boolean(nonEmpty(digest.goal) || nonEmpty(digest.summary) || digest.toolOutcomes.length > 0)
 }
+
+const SKIP_SETTLE_REASONS = new Set(['aborted', 'interrupted', 'cancelled'])
+
+export function lastTurnEndKind(session: Session): string | undefined {
+  const turns = session.events.filter(event => event.type === 'turn/end')
+  const data = turns.at(-1)?.data as { reason?: { kind?: string } } | undefined
+  const kind = data?.reason?.kind
+  return typeof kind === 'string' && kind ? kind : undefined
+}
+
+/** Cancelled / aborted / interrupted sessions must not settle. */
+export function shouldSkipSettle(session: Session): boolean {
+  const kind = lastTurnEndKind(session)
+  return kind !== undefined && SKIP_SETTLE_REASONS.has(kind)
+}
