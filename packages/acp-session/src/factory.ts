@@ -1,4 +1,5 @@
-import { Context, FiberState, Service } from '@deepseek-ai/cordis'
+import type { Context } from '@deepseek-ai/cordis'
+import { Service } from '@deepseek-ai/cordis'
 import type {
   AgentFactory,
   AgentHandle,
@@ -15,10 +16,16 @@ import { AcpSessionAgent } from './agent.ts'
 import type { ResolvedConfig } from './config.ts'
 import { resolveProviderId, type ProviderId } from './providers.ts'
 
+// @deepseek-ai/cordis exports `const enum FiberState` (PENDING=0 … UNLOADING=5).
+// Const enums are erased — the published JS has no runtime `FiberState` export.
+const FIBER_FAILED = 3
+const FIBER_DISPOSED = 4
+const FIBER_UNLOADING = 5
+
 const INACTIVE = new Set<number>([
-  FiberState.UNLOADING,
-  FiberState.DISPOSED,
-  FiberState.FAILED,
+  FIBER_UNLOADING,
+  FIBER_DISPOSED,
+  FIBER_FAILED,
 ])
 
 class FactoryOwnership {

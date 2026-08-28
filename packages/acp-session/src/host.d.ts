@@ -25,10 +25,17 @@ declare module '@deepseek-ai/cordis' {
     constructor(ctx: Context, name: string)
   }
 
-  export const FiberState: {
-    UNLOADING: number
-    DISPOSED: number
-    FAILED: number
+  /**
+   * Const enum (PENDING=0, LOADING=1, ACTIVE=2, FAILED=3, DISPOSED=4, UNLOADING=5).
+   * Erased from the published JS — do not value-import `FiberState`.
+   */
+  export const enum FiberState {
+    PENDING = 0,
+    LOADING = 1,
+    ACTIVE = 2,
+    FAILED = 3,
+    DISPOSED = 4,
+    UNLOADING = 5,
   }
 }
 
