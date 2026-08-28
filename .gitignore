@@ -8,3 +8,7 @@ coverage
 .turbo
 .vitest
 *.tsbuildinfo
+
+# Machine-local live-box probes (hardcoded ~/.dsh paths and session ids).
+e2e-patches/
+package-lock.json
