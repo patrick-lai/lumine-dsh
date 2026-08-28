@@ -22,17 +22,23 @@ import { installToolsExecuteWrap } from './tools-wrap.ts'
 
 export const name = 'lumine-goal-completion'
 /**
- * Caller-fiber services `start()` reads as hard `ctx.*` properties.
- * Official `@deepseek-ai/dsh-tool-subagent` inject is
- * `['tools', 'subagents', 'systemPrompt']`. Published
- * `applyChildComposition` does `childCtx.systemPrompt.context()` /
- * `section()` on the caller fiber (r6: `cannot get property "systemPrompt"
- * without inject`). `agentPresets` / `sandboxPolicy` / `approval` are
- * `ctx.get(...)` only — those do not throw. `parent.ctx.agents.create`
- * already ran in r6 before the systemPrompt throw, so `agents` is not a
- * missing caller-fiber inject. Keep `goals` for harvest complete.
+ * Plugin-root inject (load-time). Official `@deepseek-ai/dsh-tool-subagent`
+ * is `['tools', 'subagents', 'systemPrompt']`. Keep `goals`. This list does
+ * NOT grant those names on a nested `ctx.inject` fiber — published Cordis
+ * `ctx.inject(deps, cb)` is `ctx.plugin({ inject: deps, apply: cb })`, a
+ * new fiber whose inject map is exclusive (r7: harvest `inject(['agents'])`
+ * still threw `cannot get property "systemPrompt" without inject`).
  */
 export const inject = ['goals', 'subagents', 'tools', 'systemPrompt']
+
+/** Hard `ctx.*` services published `start()` / `applyChildComposition` read on the caller fiber. */
+export const START_CALLER_INJECT = ['goals', 'subagents', 'tools', 'systemPrompt'] as const
+
+/** Harvest `session/event` fiber. Exclusive; keep `agents` for `live.agents.get`. */
+export const HARVEST_INJECT = ['agents', ...START_CALLER_INJECT] as const
+
+/** `tools/execute` wrap also calls the judge; that fiber is exclusive to `tools` unless widened. */
+export const TOOLS_WRAP_INJECT = ['tools', 'goals', 'subagents', 'systemPrompt'] as const
 
 export type { Config } from './config.ts'
 export { resolveConfig, DEFAULT_START_TIMEOUT_MS } from './config.ts'
@@ -87,11 +93,11 @@ export function apply(ctx: Context, config: Config = {}): void {
     failClosed: resolved.failClosed,
   })
 
-  ctx.inject(['tools'], (toolsCtx) => {
+  ctx.inject([...TOOLS_WRAP_INJECT], (toolsCtx) => {
     installToolsExecuteWrap(toolsCtx, certifier)
   })
 
-  ctx.inject(['agents'], (live) => {
+  ctx.inject([...HARVEST_INJECT], (live) => {
     const fallbacks = new WeakMap<Agent, ReturnType<typeof createAcpFallback>>()
 
     const fallbackFor = (agent: Agent) => {

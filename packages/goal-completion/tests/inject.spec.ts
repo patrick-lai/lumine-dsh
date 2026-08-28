@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { apply, inject } from '../src/plugin.ts'
+import { apply, HARVEST_INJECT, inject, START_CALLER_INJECT, TOOLS_WRAP_INJECT } from '../src/plugin.ts'
 import { acpLog, makeAgent, makeGoal, makeSession } from './helpers.ts'
 
 describe('production apply() inject shape', () => {
@@ -9,6 +9,7 @@ describe('production apply() inject shape', () => {
     expect(inject).toContain('tools')
     expect(inject).toContain('systemPrompt')
     expect(inject).toEqual(['goals', 'subagents', 'tools', 'systemPrompt'])
+    expect([...START_CALLER_INJECT]).toEqual(inject)
   })
 
   it('a plugin ctx without inject([subagents, systemPrompt]) is not the production apply() shape', () => {
@@ -28,6 +29,16 @@ describe('production apply() inject shape', () => {
     expect(inject).not.toContain('agentPresets')
   })
 
+  it('widens nested harvest/tools injects because Cordis nested inject is exclusive', () => {
+    expect([...HARVEST_INJECT]).toEqual(['agents', 'goals', 'subagents', 'tools', 'systemPrompt'])
+    expect([...TOOLS_WRAP_INJECT]).toEqual(['tools', 'goals', 'subagents', 'systemPrompt'])
+    expect(HARVEST_INJECT).toContain('agents')
+    expect(HARVEST_INJECT).toContain('systemPrompt')
+    expect(HARVEST_INJECT).toContain('subagents')
+    expect(TOOLS_WRAP_INJECT).toContain('systemPrompt')
+    expect(TOOLS_WRAP_INJECT).toContain('subagents')
+  })
+
   it('apply() on a grok-build parent with injected subagents calls start()', async () => {
     const goal = makeGoal()
     const session = makeSession(acpLog('GOAL REACHED: file is exactly pong'))
@@ -44,6 +55,7 @@ describe('production apply() inject shape', () => {
       goal.phase = 'complete'
       return { ...goal, ...ref, phase: 'complete' as const }
     })
+    const injectCalls: string[][] = []
     const ctx = {
       logger: { warn() {}, info() {}, error() {} },
       goals: { get: () => goal, complete, block: vi.fn(), disarm: vi.fn() },
@@ -54,7 +66,8 @@ describe('production apply() inject shape', () => {
         list: () => ['spawn'],
         getProvider: (name: string) => ({ name, capabilities: { toolFilter: name === 'spawn' } }),
       },
-      inject(_deps: string[], callback: (inner: typeof ctx) => void) {
+      inject(deps: string[], callback: (inner: typeof ctx) => void) {
+        injectCalls.push([...deps])
         callback(ctx)
         return { dispose() {} }
       },
@@ -66,8 +79,10 @@ describe('production apply() inject shape', () => {
       },
     }
     apply(ctx as never, { fakeJudge: false, timeoutMs: 50 })
-    expect(inject).toContain('subagents')
-    expect(inject).toContain('systemPrompt')
+    expect(injectCalls).toContainEqual([...TOOLS_WRAP_INJECT])
+    expect(injectCalls).toContainEqual([...HARVEST_INJECT])
+    expect(injectCalls.some(deps => deps.length === 1 && deps[0] === 'agents')).toBe(false)
+    expect(injectCalls.some(deps => deps.length === 1 && deps[0] === 'tools')).toBe(false)
     for (const listener of listeners.get('session/event') ?? []) {
       await listener(session, session.events.find(event => event.type === 'turn/end'))
     }
