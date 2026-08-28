@@ -1,0 +1,11 @@
+# One-by-one install of @lumine/dsh-chat. This plugin only.
+#
+# Pure UI: the host apply is a no-op. The browser half replaces the stock
+# tool-call chat node so consecutive ACP tools fold into one Lumine-style
+# activity strip.
+#
+# Do not disable agent-loop here. Do not re-insert directory-picker-browse.
+
+- insert:
+    - id: lumine-chat
+      name: '@lumine/dsh-chat'

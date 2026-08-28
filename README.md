@@ -2,11 +2,12 @@
 
 Lumine capabilities as [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins. This repository is the install home: `dsh plugin --profile web add github:patrick-lai/lumine-dsh` gets everything. Packages inside can also be installed one-by-one later.
 
-**Today that is three plugins:**
+**Today that is four plugins:**
 
 - `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
 - `@lumine/dsh-goal-completion` — the deferred DSH completion policy layer. A worker `update_goal` complete (or an ACP `GOAL REACHED` marker) is only a candidate until an isolated judge outputs `GOAL COMPLETION VERDICT: APPROVED`. Human `/goal` and RPC `goal.complete` stay operator-authoritative. This bundle disables host-plane `goal-round-driver` (the stock dsh-base row) so `dsh --dump-config` shows it absent from the mounted set; marker harvest owns continue on lumine ACP presets.
 - `@lumine/dsh-routines` — host-owned durable automations (calendar cron/interval, quiet hours, overlap guard, catch-up-once). The model can create paused rows only; an operator arms them. They sit **beside** official `@deepseek-ai/dsh-schedule`, which stays mounted as session-local reminders.
+- `@lumine/dsh-chat` — Lumine inbuilt-chat transcript. Consecutive ACP tool calls fold into one collapsed activity strip instead of a hundred generic "Tool call · read_file · …" rows.
 
 Keyword for discovery: `dsh-plugin`.
 
@@ -43,6 +44,8 @@ So this plugin **replaces the Agent factory** and pins the in-page workspace pic
       name: '@lumine/dsh-goal-completion'
     - id: lumine-routines
       name: '@lumine/dsh-routines'
+    - id: lumine-chat
+      name: '@lumine/dsh-chat'
 - id: directory-picker
   name: '@deepseek-ai/dsh-host-directory-picker-auto'
   disabled: true
@@ -98,7 +101,7 @@ Local checkout:
 dsh plugin --profile web add link:/absolute/path/to/lumine-dsh
 ```
 
-A `link:` install loads `@lumine/dsh-acp-session`, `@lumine/dsh-goal-completion`, and `@lumine/dsh-routines` from their real paths. Node will not see `@deepseek-ai/cordis` in the profile `node_modules` unless those peers are linked into each package `node_modules`. Each package entry runs `ensureDshPeers()` (honors `DSH_HOME` / `DSH_PROFILE`) before importing the plugin; you can also run `node packages/acp-session/scripts/ensure-dsh-peers.mjs`, `node packages/goal-completion/scripts/ensure-dsh-peers.mjs`, or `node packages/routines/scripts/ensure-dsh-peers.mjs`.
+A `link:` install loads `@lumine/dsh-acp-session`, `@lumine/dsh-goal-completion`, `@lumine/dsh-routines`, and `@lumine/dsh-chat` from their real paths. Node will not see `@deepseek-ai/cordis` in the profile `node_modules` unless those peers are linked into each package `node_modules`. Each package entry runs `ensureDshPeers()` (honors `DSH_HOME` / `DSH_PROFILE`) before importing the plugin; you can also run `node packages/acp-session/scripts/ensure-dsh-peers.mjs`, `node packages/goal-completion/scripts/ensure-dsh-peers.mjs`, or `node packages/routines/scripts/ensure-dsh-peers.mjs`.
 
 One package only:
 
@@ -106,6 +109,7 @@ One package only:
 dsh plugin --profile web add link:/absolute/path/to/lumine-dsh/packages/acp-session
 dsh plugin --profile web add link:/absolute/path/to/lumine-dsh/packages/goal-completion
 dsh plugin --profile web add link:/absolute/path/to/lumine-dsh/packages/routines
+dsh plugin --profile web add link:/absolute/path/to/lumine-dsh/packages/chat
 ```
 
 Then `dsh --profile web`. New session → pick **Claude Code**, **Codex**, **Cursor**, or **Grok Build**.
@@ -176,7 +180,7 @@ Root `cordis.patch.yml` also inserts `lumine-goal-completion` (`timeoutMs: 90000
         args: [agent, --always-approve, stdio]
 ```
 
-Permission default is **yolo** (`allow_always` / `--always-approve` / bypass where the product supports it). Tool calls still land in the transcript.
+Permission default is **yolo** (`allow_always` / `--always-approve` / bypass where the product supports it). Tool calls still land in the session log; `@lumine/dsh-chat` folds consecutive ones into one Lumine-style activity strip so the transcript does not list every `read_file`.
 
 ### Worktrees
 
@@ -206,6 +210,9 @@ lumine-dsh/                      # root bundle (dsh.bundle)
   packages/routines/             # @lumine/dsh-routines (dsh.bundle + dsh.client)
     src/                         # calendar, persist, RPC, timer, spawn
     src/client/                  # left-rail Routines pane
+  packages/chat/                 # @lumine/dsh-chat (dsh.bundle + dsh.client)
+    src/                         # empty host apply
+    src/client/                  # Lumine activity-strip tool grouping
 ```
 
 ## Develop

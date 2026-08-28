@@ -36,6 +36,10 @@
         defaultPreset: grok-build
         tickMs: 30000
         staleAfterMs: 21600000
+    # Later than stock ui-tool so the keyed tool-call chat node is replaced
+    # with Lumine's collapsed activity strip.
+    - id: lumine-chat
+      name: '@lumine/dsh-chat'
 
 # Pin the in-page browse directory picker. directory-picker-auto picks native on
 # darwin; a detached `dsh` never shows the macOS dialog, so "+ Add workspace"

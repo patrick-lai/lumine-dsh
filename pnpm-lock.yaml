@@ -11,6 +11,9 @@ importers:
       '@lumine/dsh-acp-session':
         specifier: file:packages/acp-session
         version: link:packages/acp-session
+      '@lumine/dsh-chat':
+        specifier: file:packages/chat
+        version: link:packages/chat
       '@lumine/dsh-goal-completion':
         specifier: file:packages/goal-completion
         version: link:packages/goal-completion
@@ -19,6 +22,22 @@ importers:
         version: link:packages/routines
 
   packages/acp-session:
+    dependencies:
+      tsdown:
+        specifier: ^0.22.14
+        version: 0.22.14(typescript@5.9.3)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.17.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.1)
+
+  packages/chat:
     dependencies:
       tsdown:
         specifier: ^0.22.14
