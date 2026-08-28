@@ -44,6 +44,12 @@ export interface CompletionCandidate {
   readonly proof?: string
   /** Spawning worker. Runtime `subagents.start` requires this as `parent`. */
   readonly parent?: import('@deepseek-ai/dsh-agent').Agent
+  /**
+   * Fiber that is live at the `subagents.start()` call site (harvest startCtx
+   * or tools wrap ctx). Not the worker — grok-build `parent.ctx` inject is
+   * `agents, sessions, llm` and cannot hard-get `systemPrompt`.
+   */
+  readonly caller?: import('@deepseek-ai/cordis').Context
 }
 
 export type VerdictDecision = 'APPROVED' | 'REJECTED' | 'UNVERIFIABLE'

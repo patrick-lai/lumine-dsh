@@ -40,12 +40,37 @@ export const HARVEST_INJECT = ['agents', ...START_CALLER_INJECT] as const
 /** `tools/execute` wrap also calls the judge; that fiber is exclusive to `tools` unless widened. */
 export const TOOLS_WRAP_INJECT = ['tools', 'goals', 'subagents', 'systemPrompt'] as const
 
+/**
+ * Re-enter the start-caller inject map and run `work` on that fiber.
+ * Published Cordis fibers are exclusive plugin maps, not ALS across ticks
+ * (r8: `Promise.resolve().then` left `start()` off HARVEST_INJECT).
+ */
+export function invokeOnStartCaller<T>(
+  ctx: Context,
+  deps: readonly string[],
+  work: (startCtx: Context) => Promise<T> | T,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    try {
+      ctx.inject([...deps], (startCtx) => {
+        try {
+          resolve(Promise.resolve(work(startCtx)))
+        } catch (error: unknown) {
+          reject(error)
+        }
+      })
+    } catch (error: unknown) {
+      reject(error)
+    }
+  })
+}
+
 export type { Config } from './config.ts'
 export { resolveConfig, DEFAULT_START_TIMEOUT_MS } from './config.ts'
 export { createCertifier, CANCEL_OPERATIONS } from './certifier.ts'
 export { scanMarkers, parseJudgeOutput, REACHED_MARKER, BLOCKED_MARKER, VERDICT_MARKER } from './markers.ts'
 export { identityFence, replyFingerprint } from './fingerprint.ts'
-export { fakeJudge, judgePrompt, foldJudgeText, createRuntimeJudge, raceStart, START_DID_NOT_SETTLE } from './judge.ts'
+export { fakeJudge, judgePrompt, foldJudgeText, createRuntimeJudge, raceStart, START_DID_NOT_SETTLE, canHardGet, resolveSubagents } from './judge.ts'
 export { pinDirective, continueNudge, PLUGIN_SOURCE, verdictLine, recordVerdictNotice } from './pin.ts'
 export {
   canMountAcpFallback,
@@ -148,16 +173,20 @@ export function apply(ctx: Context, config: Config = {}): void {
       if (agent === undefined) return
       // Published Session.append dispatches session/event while `appending`
       // is true and does not await the listener. Defer one tick so start()
-      // / verdict append cannot reenter the open publication.
+      // / verdict append cannot reenter the open publication. Re-enter
+      // HARVEST_INJECT inside the tick — fibers are not ALS (r8).
       return Promise.resolve().then(() =>
-        fallbackFor(agent).onSettledTurn({
-          agent,
-          session: agent.session ?? session,
-          endKind: row.type === 'turn/end' ? turnEndKind(row.data) : undefined,
-        }).catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error)
-          live.logger.warn(`lumine-goal-completion: ACP settle failed: ${message}`)
-        }),
+        invokeOnStartCaller(live, HARVEST_INJECT, startCtx =>
+          fallbackFor(agent).onSettledTurn({
+            agent,
+            session: agent.session ?? session,
+            endKind: row.type === 'turn/end' ? turnEndKind(row.data) : undefined,
+            caller: startCtx,
+          }).catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error)
+            live.logger.warn(`lumine-goal-completion: ACP settle failed: ${message}`)
+          }),
+        ),
       )
     })
   })

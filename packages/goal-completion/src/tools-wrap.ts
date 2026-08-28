@@ -46,6 +46,7 @@ export async function aroundUpdateGoalExecute(
   exec: ToolExecuteView,
   next: () => Promise<unknown> | unknown,
   certifier: CompletionCertifier,
+  caller?: import('@deepseek-ai/cordis').Context,
 ): Promise<unknown> {
   if (exec.name !== 'update_goal') return next()
   const args = exec.arguments ?? {}
@@ -59,7 +60,12 @@ export async function aroundUpdateGoalExecute(
 
   const reply = lastAssistantReply(agent.session.events)
     ?? `update_goal complete claimed for ${ref.id}@${ref.revision}`
-  const result = await certifier.certify({ agent, ref, reply })
+  const result = await certifier.certify({
+    agent,
+    ref,
+    reply,
+    ...caller === undefined ? {} : { caller },
+  })
   if (!result.completed) throw refuseCompletion(result.verdict)
   return next()
 }
@@ -89,6 +95,11 @@ export function installToolsExecuteWrap(
 ): void {
   ctx.on('tools/execute', (exec: unknown, next: unknown) => {
     const proceed = typeof next === 'function' ? (next as () => Promise<unknown> | unknown) : async () => undefined
-    return aroundUpdateGoalExecute(exec as ToolExecuteView, proceed, certifier)
+    return aroundUpdateGoalExecute(
+      exec as ToolExecuteView,
+      proceed,
+      certifier,
+      ctx as import('@deepseek-ai/cordis').Context,
+    )
   })
 }

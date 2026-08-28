@@ -34,6 +34,8 @@ export interface ConsiderInput {
   readonly ref: GoalRef
   readonly reply: string
   readonly proof?: string
+  /** Live start-caller ctx. Passed through to the judge; not a fake parent. */
+  readonly caller?: import('@deepseek-ai/cordis').Context
 }
 
 export interface ConsiderResult {
@@ -160,6 +162,7 @@ export class CompletionCertifier {
         reply: input.reply,
         parent: input.agent,
         ...input.proof === undefined ? {} : { proof: input.proof },
+        ...input.caller === undefined ? {} : { caller: input.caller },
       }, controller.signal)
     } catch (error: unknown) {
       if (controller.signal.aborted) {

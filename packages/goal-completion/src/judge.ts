@@ -248,8 +248,29 @@ function readSubagents(scope: { subagents?: Context['subagents']; get?: (name: s
   }
 }
 
-function resolveSubagents(ctx: Context, parent?: Agent): Context['subagents'] {
-  return readSubagents(parent?.ctx) ?? readSubagents(ctx)
+/** Hard `ctx.name` access — the published inject check, not `ctx.get`. */
+export function canHardGet(scope: object | undefined, name: string): boolean {
+  if (!scope) return false
+  try {
+    return (scope as Record<string, unknown>)[name] != null
+  } catch {
+    return false
+  }
+}
+
+/**
+ * `subagents.start` must run on a ctx that can hard-get `systemPrompt`.
+ * Grok-build `parent.ctx` is `@lumine/dsh-acp-session` (`agents`, `sessions`,
+ * `llm`) — skip it. Prefer the harvest/tools `caller` (startCtx).
+ */
+export function resolveSubagents(ctx: Context, parent?: Agent, caller?: Context): Context['subagents'] {
+  const fromCaller = readSubagents(caller)
+  if (fromCaller) return fromCaller
+  if (parent?.ctx && canHardGet(parent.ctx, 'systemPrompt')) {
+    const fromParent = readSubagents(parent.ctx)
+    if (fromParent) return fromParent
+  }
+  return readSubagents(ctx)
 }
 
 export function createRuntimeJudge(ctx: Context, config: ResolvedConfig, worker?: { options?: { provider?: string }; session?: { header?: { agentPreset?: string } } }): JudgeFn {
@@ -260,7 +281,7 @@ export function createRuntimeJudge(ctx: Context, config: ResolvedConfig, worker?
     if (signal.aborted) return { decision: 'UNVERIFIABLE', reason: 'verification was cancelled' }
 
     const parent = candidate.parent ?? (worker as Agent | undefined)
-    const subagents = resolveSubagents(ctx, parent)
+    const subagents = resolveSubagents(candidate.caller ?? ctx, parent, candidate.caller)
     if (!subagents || typeof subagents.start !== 'function') {
       ctx.logger.warn('lumine-goal-completion: subagents.start is missing; judge is UNVERIFIABLE')
       return { decision: 'UNVERIFIABLE', reason: 'no read-only judge is available' }

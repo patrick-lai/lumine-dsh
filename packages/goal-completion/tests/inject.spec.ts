@@ -83,9 +83,12 @@ describe('production apply() inject shape', () => {
     expect(injectCalls).toContainEqual([...HARVEST_INJECT])
     expect(injectCalls.some(deps => deps.length === 1 && deps[0] === 'agents')).toBe(false)
     expect(injectCalls.some(deps => deps.length === 1 && deps[0] === 'tools')).toBe(false)
+    const harvestBeforeEvent = injectCalls.filter(deps => deps.join(',') === HARVEST_INJECT.join(',')).length
     for (const listener of listeners.get('session/event') ?? []) {
       await listener(session, session.events.find(event => event.type === 'turn/end'))
     }
+    const harvestAfterEvent = injectCalls.filter(deps => deps.join(',') === HARVEST_INJECT.join(',')).length
+    expect(harvestAfterEvent).toBeGreaterThan(harvestBeforeEvent)
     expect(start).toHaveBeenCalledOnce()
     expect(start.mock.calls[0]?.[0]).toBe('spawn')
     expect(complete).toHaveBeenCalledOnce()

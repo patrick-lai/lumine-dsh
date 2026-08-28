@@ -46,6 +46,8 @@ export interface SettledTurnInput {
   readonly agent: Agent
   readonly session: SessionLike
   readonly endKind?: string
+  /** Fiber live at `start()` time. Re-entered after the one-tick defer. */
+  readonly caller?: import('@deepseek-ai/cordis').Context
 }
 
 export type HarvestAction = 'complete' | 'block' | 'nudge' | 'ignore' | 'halt'
@@ -137,6 +139,7 @@ export class AcpFallback {
         ref: { id: goal.id, revision: goal.revision },
         reply,
         ...proof === undefined ? {} : { proof },
+        ...input.caller === undefined ? {} : { caller: input.caller },
       })
       const verdict = recordVerdictNotice(input.agent, result.verdict)
       state.lastVerdict = verdict

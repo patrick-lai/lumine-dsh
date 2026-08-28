@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { resolveConfig } from '../src/config.ts'
-import { createRuntimeJudge, judgeToolFilter, pickStartProvider, START_DID_NOT_SETTLE } from '../src/judge.ts'
+import { canHardGet, createRuntimeJudge, judgeToolFilter, pickStartProvider, START_DID_NOT_SETTLE } from '../src/judge.ts'
 import { lastAssistantReply } from '../src/session.ts'
 import { acpChunkLog, assistantMessage, makeAgent, makeSession, turnEnd } from './helpers.ts'
 
@@ -371,6 +371,65 @@ describe('runtime judge start() shape', () => {
     expect(dispose).toHaveBeenCalledOnce()
   })
 
+  it('starts via caller ctx, not parent.ctx when parent cannot hard-get systemPrompt', async () => {
+    const parentStart = vi.fn(async () => {
+      throw new Error('must not start on parent.ctx')
+    })
+    const callerStart = vi.fn(async (_name: string, request: { parent: unknown }) => {
+      expect(request.parent).toBe(parent)
+      return {
+        result: Promise.resolve({
+          output: [{ type: 'text', text: 'GOAL COMPLETION VERDICT: APPROVED - via startCtx' }],
+          stopReason: 'completed',
+        }),
+        dispose: vi.fn(),
+      }
+    })
+    const parent = makeAgent(makeSession())
+    parent.ctx = {
+      get subagents() {
+        return {
+          start: parentStart,
+          list: () => ['spawn'],
+          getProvider: () => ({ name: 'spawn', capabilities: { toolFilter: true } }),
+        }
+      },
+      get systemPrompt() {
+        throw new Error('cannot get property "systemPrompt" without inject')
+      },
+    } as typeof parent.ctx
+    const caller = {
+      logger: { warn() {}, info() {}, error() {} },
+      systemPrompt: { context() {}, section() {} },
+      subagents: {
+        start: callerStart,
+        list: () => ['spawn'],
+        getProvider: () => ({ name: 'spawn', capabilities: { toolFilter: true } }),
+      },
+    }
+    const applyCtx = {
+      logger: { warn() {}, info() {}, error() {} },
+      subagents: { start: parentStart, list: () => ['spawn'] },
+    }
+    const judge = createRuntimeJudge(applyCtx as never, {
+      timeoutMs: 1_000,
+      failClosed: true,
+      fakeJudge: false,
+    })
+    const verdict = await judge({
+      goalId: 'goal-1',
+      revision: 1,
+      objective: 'file is exactly pong',
+      reply: 'GOAL REACHED: file is exactly pong',
+      parent,
+      caller: caller as never,
+    }, new AbortController().signal)
+    expect(parentStart).not.toHaveBeenCalled()
+    expect(callerStart).toHaveBeenCalledOnce()
+    expect((callerStart.mock.calls[0]?.[1] as { parent: unknown }).parent).toBe(parent)
+    expect(verdict).toEqual({ decision: 'APPROVED', reason: 'via startCtx' })
+  })
+
   it('does not invent spawn when no provider is registered', async () => {
     const start = vi.fn(async () => {
       throw new Error('should not start')
@@ -418,6 +477,16 @@ describe('runtime judge start() shape', () => {
     }, new AbortController().signal)
     expect(start).toHaveBeenCalledOnce()
     expect(verdict).toEqual({ decision: 'UNVERIFIABLE', reason: START_DID_NOT_SETTLE })
+  })
+
+  it('canHardGet is false when the property throws without inject', () => {
+    expect(canHardGet({
+      get systemPrompt() {
+        throw new Error('cannot get property "systemPrompt" without inject')
+      },
+    }, 'systemPrompt')).toBe(false)
+    expect(canHardGet({ systemPrompt: { context() {} } }, 'systemPrompt')).toBe(true)
+    expect(canHardGet({ systemPrompt: undefined }, 'systemPrompt')).toBe(false)
   })
 
   it('only denies registered write tools', () => {
