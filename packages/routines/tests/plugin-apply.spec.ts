@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('../src/service.ts', () => ({
+  RoutineService: class RoutineService {},
+}))
+
 import { apply, parseRoutineCommand, resolveConfig } from '../src/plugin.ts'
 
 describe('plugin apply mounts the routine service', () => {
