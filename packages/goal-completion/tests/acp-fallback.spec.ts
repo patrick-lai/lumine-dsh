@@ -3,7 +3,7 @@ import { createAcpFallback } from '../src/acp-fallback.ts'
 import { createCertifier } from '../src/certifier.ts'
 import { fakeJudge } from '../src/judge.ts'
 import { continueNudge } from '../src/pin.ts'
-import { acpLog, makeAgent, makeGoal, makeSession } from './helpers.ts'
+import { acpBind, acpLog, assistantMessage, makeAgent, makeGoal, makeSession, turnEnd, userMessage } from './helpers.ts'
 
 describe('ACP marker harvest', () => {
   it('GOAL REACHED on an ACP-shaped log is a candidate; fake APPROVED completes once', async () => {
@@ -92,5 +92,50 @@ describe('ACP marker harvest', () => {
     expect(result.action).toBe('block')
     expect(block).toHaveBeenCalledOnce()
     expect(block.mock.calls[0]?.[2]).toEqual({ code: 'model-reported', message: 'deploy key' })
+  })
+
+  it('does not increment auto-continue rounds on an operator turn', async () => {
+    const goal = makeGoal()
+    const followups: Array<{ content: Array<{ text?: string }> }> = []
+    const fallback = createAcpFallback({
+      certifier: createCertifier({
+        judge: fakeJudge('APPROVED', 'unused'),
+        complete: vi.fn(),
+        getGoal: () => goal,
+        timeoutMs: 1_000,
+        failClosed: true,
+      }),
+      goals: { get: () => goal, complete: vi.fn(), block: vi.fn() },
+      sessionIsLumineAcp: true,
+      roundDriverPresent: false,
+    })
+    const agent = makeAgent(makeSession(), followups)
+
+    const first = makeSession(acpLog('Still working.', { kind: 'user' }))
+    const firstResult = await fallback.onSettledTurn({ agent, session: first, endKind: 'completed' })
+    expect(firstResult.action).toBe('nudge')
+    expect(firstResult.nudge).toContain('auto-continue round 1')
+    expect(fallback.state(agent).rounds).toBe(1)
+
+    const secondOperator = makeSession([
+      ...acpLog('Still working.', { kind: 'user' }),
+    ])
+    const second = await fallback.onSettledTurn({
+      agent,
+      session: secondOperator,
+      endKind: 'completed',
+    })
+    expect(second.nudge).toContain('auto-continue round 1')
+    expect(fallback.state(agent).rounds).toBe(1)
+
+    const auto = makeSession([
+      acpBind(),
+      userMessage('PINNED GOAL', { kind: 'plugin', plugin: 'lumine-goal-completion' }),
+      assistantMessage('Still working.'),
+      turnEnd('completed'),
+    ])
+    const third = await fallback.onSettledTurn({ agent, session: auto, endKind: 'completed' })
+    expect(third.nudge).toContain('auto-continue round 2')
+    expect(fallback.state(agent).rounds).toBe(2)
   })
 })

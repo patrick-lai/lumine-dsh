@@ -33,6 +33,8 @@ export interface CompletionCandidate {
   readonly objective: string
   readonly reply: string
   readonly proof?: string
+  /** Spawning worker. Runtime `subagents.start` requires this as `parent`. */
+  readonly parent?: import('@deepseek-ai/dsh-agent').Agent
 }
 
 export type VerdictDecision = 'APPROVED' | 'REJECTED' | 'UNVERIFIABLE'

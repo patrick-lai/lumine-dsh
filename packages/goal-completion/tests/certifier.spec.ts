@@ -84,6 +84,27 @@ describe('worker complete certifier', () => {
     expect(goal.phase).toBe('active')
   })
 
+  it('certify() APPROVED does not call complete() — the tool body owns that', async () => {
+    const goal = makeGoal()
+    const complete = vi.fn()
+    const certifier = createCertifier({
+      judge: fakeJudge('APPROVED', 'ok'),
+      complete,
+      getGoal: () => goal,
+      timeoutMs: 1_000,
+      failClosed: true,
+    })
+    const result = await certifier.certify({
+      agent: makeAgent(makeSession()),
+      ref: { id: goal.id, revision: goal.revision },
+      reply: 'GOAL REACHED: shipped',
+    })
+    expect(result.completed).toBe(true)
+    expect(result.verdict.decision).toBe('APPROVED')
+    expect(complete).not.toHaveBeenCalled()
+    expect(goal.phase).toBe('active')
+  })
+
   it('does not wrap a direct operator complete()', () => {
     const goal = makeGoal()
     const complete = vi.fn(() => {

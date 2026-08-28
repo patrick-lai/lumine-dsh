@@ -38,6 +38,31 @@ export function isLumineAcpSession(session: SessionLike | undefined): boolean {
   return lastBoundAcpSession(session.events) !== undefined
 }
 
+/**
+ * Whether this session's own composition mounted an enabled round-driver.
+ * Host-plane registry presence is NOT consulted — that was a one-shot global
+ * veto that killed ACP fallback on every stock DSH host.
+ */
+export function agentScopedRoundDriverEnabled(ctx: {
+  fiber?: { children?: Array<{ name?: string; disabled?: boolean }> }
+  runtime?: { name?: string }
+} | undefined): boolean {
+  if (!ctx) return false
+  for (const child of ctx.fiber?.children ?? []) {
+    if (child.disabled) continue
+    if (typeof child.name === 'string' && isRoundDriverId(child.name)) return true
+  }
+  return typeof ctx.runtime?.name === 'string' && isRoundDriverId(ctx.runtime.name)
+}
+
+function isRoundDriverId(id: string): boolean {
+  return (ROUND_DRIVER_IDS as readonly string[]).includes(id)
+}
+
+/**
+ * ACP harvest mounts only on lumine ACP sessions, and only when that
+ * session's composition did not also mount the round-driver.
+ */
 export function canMountAcpFallback(input: {
   readonly sessionIsLumineAcp: boolean
   readonly roundDriverPresent: boolean
@@ -77,7 +102,7 @@ export function collectPluginIds(ctx: {
 
 export function hasRoundDriver(ctx: Parameters<typeof collectPluginIds>[0]): boolean {
   const ids = collectPluginIds(ctx)
-  return ids.some(id => (ROUND_DRIVER_IDS as readonly string[]).includes(id))
+  return ids.some(id => isRoundDriverId(id))
 }
 
 export function lastAssistantReply(events: ReadonlyArray<{ type: string; data?: unknown }> | undefined): string | undefined {

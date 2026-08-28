@@ -98,20 +98,26 @@ export class AcpFallback {
         reply: reply ?? '',
         ...marker.proof === undefined ? {} : { proof: marker.proof },
       })
-      return { action: result.completed ? 'complete' : 'nudge', ...result.completed ? {} : { nudge: this.nudge(input.agent, goal) } }
+      if (result.completed) return { action: 'complete' }
+      const lastUser = lastUserSource(input.session.events)
+      const operatorTurn = !isPluginNoticeSource(lastUser)
+      return { action: 'nudge', nudge: this.nudge(input.agent, goal, { increment: !operatorTurn }) }
     }
 
     const lastUser = lastUserSource(input.session.events)
-    if (isPluginNoticeSource(lastUser) && this.state(input.agent).lastNudge) {
-      // Auto-continue turn settled unresolved — send the next nudge.
-    }
-    const text = this.nudge(input.agent, goal)
+    const operatorTurn = !isPluginNoticeSource(lastUser)
+    const text = this.nudge(input.agent, goal, { increment: !operatorTurn })
     return { action: 'nudge', nudge: text }
   }
 
-  private nudge(agent: Agent, goal: GoalView): string {
+  /**
+   * Hidden continue. Operator turns must not increment the auto-continue
+   * round counter (inventory contract). Auto-continue (plugin-notice) turns do.
+   */
+  private nudge(agent: Agent, goal: GoalView, options: { increment: boolean }): string {
     const state = this.state(agent)
-    state.rounds += 1
+    if (options.increment) state.rounds += 1
+    else if (state.rounds === 0) state.rounds = 1
     const text = continueNudge(goal.objective, state.rounds)
     state.lastNudge = text
     agent.followup(pluginNotice(text, `PINNED GOAL — not yet reached (auto-continue round ${state.rounds})`) as never)

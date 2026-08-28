@@ -78,21 +78,38 @@ export function makeAgent(session: Session, followups: unknown[] = []): Agent {
   }
 }
 
-export function acpLog(reply: string): SessionEvent[] {
+export function userMessage(
+  text: string,
+  source: { kind: string; plugin?: string } = { kind: 'user' },
+  turn = 1,
+): SessionEvent {
+  return {
+    type: 'user/message',
+    seq: turn,
+    time: Date.now(),
+    data: {
+      id: `u-${turn}`,
+      role: 'user',
+      content: [{ type: 'text', text }],
+      source,
+    },
+  }
+}
+
+export function nativeLog(reply: string): SessionEvent[] {
+  return [
+    { type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } },
+    userMessage('go'),
+    assistantMessage(reply),
+    turnEnd('completed'),
+  ]
+}
+
+export function acpLog(reply: string, source: { kind: string; plugin?: string } = { kind: 'user' }): SessionEvent[] {
   return [
     acpBind(),
     { type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } },
-    {
-      type: 'user/message',
-      seq: 2,
-      time: 2,
-      data: {
-        id: 'u1',
-        role: 'user',
-        content: [{ type: 'text', text: 'go' }],
-        source: { kind: 'user' },
-      },
-    },
+    userMessage('go', source),
     assistantMessage(reply),
     turnEnd('completed'),
   ]

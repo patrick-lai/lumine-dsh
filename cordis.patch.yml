@@ -10,10 +10,11 @@
       config:
         permission: yolo
         defaultProvider: claude
-    # Deferred DSH completion policy. Wraps worker update_goal complete;
-    # ACP marker harvest mounts only on lumine ACP sessions and never
-    # beside dsh-goal-round-driver. Human /goal and RPC goal.complete
-    # stay operator-authoritative.
+    # Deferred DSH completion policy. tools/execute around-hook certifies
+    # worker update_goal complete, then the original execute commits.
+    # ACP marker harvest mounts INSTEAD OF goal-round-driver on lumine ACP
+    # presets (those compositions disable the driver). Human /goal and RPC
+    # goal.complete stay operator-authoritative.
     - id: lumine-goal-completion
       name: '@lumine/dsh-goal-completion'
       config:

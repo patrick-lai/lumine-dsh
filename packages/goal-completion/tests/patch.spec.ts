@@ -24,4 +24,12 @@ describe('goal-completion cordis overlay', () => {
     expect(pkg).not.toMatch(/id:\s*directory-picker-browse/)
     expect(pkg).not.toMatch(/id:\s*lumine-acp-session/)
   })
+
+  it('disables goal-round-driver on every lumine ACP preset', () => {
+    for (const id of ['grok-build', 'claude-code', 'codex', 'cursor']) {
+      const source = patch(`../../acp-session/presets/${id}/agent.cordis.yml`)
+      expect(source).toMatch(/id:\s*goal-round-driver/)
+      expect(source).toMatch(/disabled:\s*true/)
+    }
+  })
 })

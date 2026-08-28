@@ -11,9 +11,42 @@ declare module '@deepseek-ai/cordis' {
     sessions: import('@deepseek-ai/dsh-session').SessionStore
     goals?: GoalHost
     tools?: ToolHost
+    llm?: {
+      listProviders?(): Array<{ id: string }>
+    }
+    /**
+     * Published `@deepseek-ai/dsh-subagent` service.
+     * `start(name, { prompt: ContentBlock[], parent, signal, toolFilter? })`.
+     */
     subagents?: {
-      run?(request: Record<string, unknown>): Promise<{ text?: string; output?: string }>
-      spawn?(request: Record<string, unknown>): Promise<{ text?: string; output?: string }>
+      start?(
+        name: string,
+        request: {
+          prompt: Array<{ type: string; text?: string; [key: string]: unknown }>
+          parent: import('@deepseek-ai/dsh-agent').Agent
+          signal: AbortSignal
+          toolFilter?: { allow?: readonly string[]; deny?: readonly string[] }
+          agentOptions?: { provider?: string; model?: string }
+          label?: string
+        },
+      ): Promise<{
+        result: Promise<{
+          output?: Array<{ type?: string; text?: string }>
+          stopReason?: string
+        }>
+        dispose(): Promise<void> | void
+      }>
+      list?(): string[]
+      getProvider?(name: string): {
+        name: string
+        capabilities?: {
+          toolFilter?: boolean
+          agentOptions?: boolean
+          outputSchema?: boolean
+          depthLimit?: boolean
+          persona?: boolean
+        }
+      } | undefined
     }
     registry?: {
       keys?(): Iterable<unknown>
@@ -26,6 +59,7 @@ declare module '@deepseek-ai/cordis' {
     plugin(plugin: unknown, config?: unknown): { ctx: Context; dispose: () => Promise<void> | void }
     extend(value: Record<string | symbol, unknown>): Context
     inject(deps: string[], callback: (ctx: Context) => void): { dispose: () => Promise<void> | void }
+    /** Cordis events. `tools/execute` is an around-dispatch waterfall `(exec, next) => result`. */
     on(event: string, listener: (...args: unknown[]) => unknown): () => void
   }
 
@@ -68,6 +102,8 @@ interface GoalHost {
     ref: GoalRefLike,
     reason: { code: string; message: string },
   ): GoalViewLike
+  /** Remove process-local continuation authority without writing a revision. */
+  disarm?(agent: import('@deepseek-ai/dsh-agent').Agent): GoalViewLike | void
 }
 
 interface ToolDefinition {
@@ -80,6 +116,13 @@ interface ToolHost {
   register(tool: ToolDefinition): unknown
   get?(name: string): ToolDefinition | undefined
   lookup?(name: string): ToolDefinition | undefined
+  schemas?(scope?: unknown): Array<{ name: string }>
+  execute?(input: {
+    name: string
+    arguments: unknown
+    agent?: import('@deepseek-ai/dsh-agent').Agent
+    signal: AbortSignal
+  }): Promise<unknown>
 }
 
 declare module '@deepseek-ai/dsh-session' {

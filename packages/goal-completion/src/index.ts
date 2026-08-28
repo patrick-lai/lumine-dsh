@@ -38,7 +38,9 @@ export const lastBoundAcpSession = plugin.lastBoundAcpSession
 export const LUMINE_ACP_PRESETS = plugin.LUMINE_ACP_PRESETS
 export const createAcpFallback = plugin.createAcpFallback
 export const wrapUpdateGoalTool = plugin.wrapUpdateGoalTool
-export const installUpdateGoalWrap = plugin.installUpdateGoalWrap
+export const installToolsExecuteWrap = plugin.installToolsExecuteWrap
+export const aroundUpdateGoalExecute = plugin.aroundUpdateGoalExecute
+export const agentScopedRoundDriverEnabled = plugin.agentScopedRoundDriverEnabled
 export const DSH_PEERS = plugin.DSH_PEERS
 export { ensureDshPeers }
 

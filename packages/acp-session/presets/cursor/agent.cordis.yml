@@ -1,2 +1,6 @@
 # Product-owned session: Cursor holds tools. Do not mount DSH bash/fs/web.
-[]
+# ACP harvest mounts INSTEAD OF goal-round-driver on this preset. Never sit
+# beside the driver; never install marker harvest on DeepSeek-native sessions.
+- id: goal-round-driver
+  name: '@deepseek-ai/dsh-goal-round-driver'
+  disabled: true

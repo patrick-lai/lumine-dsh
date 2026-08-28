@@ -1,25 +1,51 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { apply } from '../src/plugin.ts'
 import { createAcpFallback } from '../src/acp-fallback.ts'
 import { createCertifier } from '../src/certifier.ts'
 import { fakeJudge } from '../src/judge.ts'
-import { canMountAcpFallback, hasRoundDriver } from '../src/session.ts'
-import { acpLog, makeAgent, makeGoal, makeSession } from './helpers.ts'
+import {
+  agentScopedRoundDriverEnabled,
+  canMountAcpFallback,
+  hasRoundDriver,
+} from '../src/session.ts'
+import { acpLog, makeAgent, makeGoal, makeSession, nativeLog } from './helpers.ts'
 
-describe('never mount ACP fallback beside the goal-round-driver', () => {
-  it('refuses the marker loop when the round-driver is present', () => {
+const GROK_PRESET = readFileSync(new URL('../../acp-session/presets/grok-build/agent.cordis.yml', import.meta.url), 'utf8')
+
+describe('ACP harvest mounts instead of the goal-round-driver on lumine presets', () => {
+  it('grok-build preset disables the driver so harvest can mount', () => {
+    expect(GROK_PRESET).toMatch(/id:\s*goal-round-driver/)
+    expect(GROK_PRESET).toMatch(/disabled:\s*true/)
+    expect(GROK_PRESET).not.toMatch(/^\[\]\s*$/m)
+  })
+
+  it('refuses the marker loop only when THIS session mounted the driver', () => {
     expect(canMountAcpFallback({ sessionIsLumineAcp: true, roundDriverPresent: true })).toBe(false)
     expect(canMountAcpFallback({ sessionIsLumineAcp: true, roundDriverPresent: false })).toBe(true)
     expect(canMountAcpFallback({ sessionIsLumineAcp: false, roundDriverPresent: false })).toBe(false)
   })
 
-  it('detects the official driver plugin id', () => {
+  it('detects the official driver plugin id on a host registry (id helper only)', () => {
     expect(hasRoundDriver({ registry: new Map([['goal-round-driver', {}]]) })).toBe(true)
     expect(hasRoundDriver({ registry: new Map([['@deepseek-ai/dsh-goal-round-driver', {}]]) })).toBe(true)
     expect(hasRoundDriver({ registry: new Map([['lumine-acp-session', {}]]) })).toBe(false)
   })
 
-  it('does not nudge or complete when the fallback is refused', async () => {
+  it('ignores a host-plane registry when deciding the agent-scoped driver', () => {
+    expect(agentScopedRoundDriverEnabled({
+      fiber: { children: [] },
+      runtime: { name: 'lumine-goal-completion' },
+    })).toBe(false)
+    expect(agentScopedRoundDriverEnabled({
+      fiber: { children: [{ name: 'goal-round-driver' }] },
+    })).toBe(true)
+    expect(agentScopedRoundDriverEnabled({
+      fiber: { children: [{ name: 'goal-round-driver', disabled: true }] },
+    })).toBe(false)
+  })
+
+  it('does not nudge or complete when the session itself mounted the driver', async () => {
     const goal = makeGoal()
     const complete = vi.fn()
     const followups: unknown[] = []
@@ -47,7 +73,7 @@ describe('never mount ACP fallback beside the goal-round-driver', () => {
     expect(followups).toHaveLength(0)
   })
 
-  it('apply() with a loaded round-driver does not start the ACP loop', async () => {
+  it('apply() on grok-build mounts harvest even when the host registry has the driver', async () => {
     const followups: unknown[] = []
     const session = makeSession(acpLog('still going'))
     const agent = makeAgent(session, followups)
@@ -58,6 +84,7 @@ describe('never mount ACP fallback beside the goal-round-driver', () => {
         get: () => makeGoal(),
         complete: vi.fn(),
         block: vi.fn(),
+        disarm: vi.fn(),
       },
       agents: { get: () => agent },
       registry: new Map([['goal-round-driver', { name: 'goal-round-driver' }]]),
@@ -74,6 +101,41 @@ describe('never mount ACP fallback beside the goal-round-driver', () => {
       },
     }
     apply(ctx as never, { fakeJudge: true, timeoutMs: 50 })
+    for (const listener of listeners.get('session/event') ?? []) {
+      await listener(session, session.events.find(event => event.type === 'turn/end'))
+    }
+    expect(followups.length).toBeGreaterThan(0)
+    expect(String((followups[0] as { content?: Array<{ text?: string }> })?.content?.[0]?.text ?? '')).toContain(
+      'PINNED GOAL — not yet reached',
+    )
+    expect(ctx.goals.complete).not.toHaveBeenCalled()
+  })
+
+  it('apply() does not harvest markers on a DeepSeek-native session', async () => {
+    const followups: unknown[] = []
+    const session = makeSession(nativeLog('GOAL REACHED: native should not harvest'), 'standard')
+    const agent = makeAgent(session, followups)
+    const listeners = new Map<string, Array<(...args: unknown[]) => unknown>>()
+    const ctx = {
+      logger: { warn() {}, info() {}, error() {} },
+      goals: {
+        get: () => makeGoal(),
+        complete: vi.fn(),
+        block: vi.fn(),
+      },
+      agents: { get: () => agent },
+      inject(_deps: string[], callback: (inner: typeof ctx) => void) {
+        callback(ctx)
+        return { dispose() {} }
+      },
+      on(event: string, listener: (...args: unknown[]) => unknown) {
+        const bucket = listeners.get(event) ?? []
+        bucket.push(listener)
+        listeners.set(event, bucket)
+        return () => {}
+      },
+    }
+    apply(ctx as never, { judge: fakeJudge('APPROVED', 'unused'), timeoutMs: 50 })
     for (const listener of listeners.get('session/event') ?? []) {
       await listener(session, session.events.find(event => event.type === 'turn/end'))
     }

@@ -1,9 +1,10 @@
 /**
  * Fail-closed goal completion policy for DeepSeek Harness.
  *
- * Wraps worker `update_goal` complete (never human `/goal` or RPC
- * `goal.complete`) and, on lumine ACP sessions only, harvests line-start
- * `GOAL REACHED` / `BLOCKED:` markers after a settled turn.
+ * Intercepts worker `update_goal` complete via the `tools/execute`
+ * around-hook (never human `/goal` or RPC `goal.complete`). On lumine ACP
+ * sessions only, harvests line-start `GOAL REACHED` / `BLOCKED:` markers
+ * after a settled turn — mounted instead of `goal-round-driver`.
  *
  * Loaded via `src/index.ts` after DSH peers are linked.
  *
@@ -16,8 +17,8 @@ import { createAcpFallback } from './acp-fallback.ts'
 import { createCertifier } from './certifier.ts'
 import { resolveConfig, type Config } from './config.ts'
 import { resolveJudge } from './judge.ts'
-import { hasRoundDriver, isLumineAcpSession, turnEndKind } from './session.ts'
-import { installUpdateGoalWrap } from './tools-wrap.ts'
+import { agentScopedRoundDriverEnabled, isLumineAcpSession, turnEndKind } from './session.ts'
+import { installToolsExecuteWrap } from './tools-wrap.ts'
 
 export const name = 'lumine-goal-completion'
 export const inject = ['goals']
@@ -33,13 +34,18 @@ export {
   canMountAcpFallback,
   collectPluginIds,
   hasRoundDriver,
+  agentScopedRoundDriverEnabled,
   isLumineAcpSession,
   lastAssistantReply,
   lastBoundAcpSession,
   LUMINE_ACP_PRESETS,
 } from './session.ts'
 export { createAcpFallback } from './acp-fallback.ts'
-export { wrapUpdateGoalTool, installUpdateGoalWrap } from './tools-wrap.ts'
+export {
+  wrapUpdateGoalTool,
+  installToolsExecuteWrap,
+  aroundUpdateGoalExecute,
+} from './tools-wrap.ts'
 export { ensureDshPeers, DSH_PEERS } from './peers.ts'
 
 function changedAgent(payload: unknown): Agent | undefined {
@@ -71,10 +77,8 @@ export function apply(ctx: Context, config: Config = {}): void {
   })
 
   ctx.inject(['tools'], (toolsCtx) => {
-    if (toolsCtx.tools) installUpdateGoalWrap(toolsCtx.tools, certifier)
+    installToolsExecuteWrap(toolsCtx, certifier)
   })
-
-  const roundDriverPresent = hasRoundDriver(ctx)
 
   ctx.inject(['agents'], (live) => {
     const fallbacks = new WeakMap<Agent, ReturnType<typeof createAcpFallback>>()
@@ -82,11 +86,13 @@ export function apply(ctx: Context, config: Config = {}): void {
     const fallbackFor = (agent: Agent) => {
       const existing = fallbacks.get(agent)
       if (existing) return existing
+      // Per-session, not a host-global veto. Stock DSH always loads the
+      // host-plane driver; that must not kill ACP harvest forever.
       const created = createAcpFallback({
         certifier,
         goals,
         sessionIsLumineAcp: isLumineAcpSession(agent.session),
-        roundDriverPresent,
+        roundDriverPresent: agentScopedRoundDriverEnabled(agent.ctx),
       })
       fallbacks.set(agent, created)
       return created
@@ -98,7 +104,20 @@ export function apply(ctx: Context, config: Config = {}): void {
       if (agent && operation) certifier.onGoalChanged(agent, operation)
       if (agent && operation === 'create') {
         const goal = goals.get(agent)
-        if (goal?.phase === 'active') fallbackFor(agent).onCreate(agent, goal.objective)
+        if (goal?.phase === 'active') {
+          const fallback = fallbackFor(agent)
+          fallback.onCreate(agent, goal.objective)
+          // Host-plane goal-round-driver drives any armed agent. Disarm so
+          // it no-ops on this ACP session; harvest owns continue instead.
+          if (fallback.mounted && typeof goals.disarm === 'function' && goal.activation === 'armed') {
+            try {
+              goals.disarm(agent)
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : String(error)
+              live.logger.warn(`lumine-goal-completion: could not disarm ACP goal: ${message}`)
+            }
+          }
+        }
       }
     })
 

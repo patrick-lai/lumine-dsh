@@ -18,6 +18,7 @@ export interface GoalView {
   readonly revision: number
   readonly objective: string
   readonly phase: 'active' | 'paused' | 'blocked' | 'complete'
+  readonly activation?: 'armed' | 'disarmed'
 }
 
 export interface CertifierOptions {
@@ -64,7 +65,12 @@ export class CompletionCertifier {
     if (CANCEL_OPERATIONS.has(operation)) this.cancel(agent.id, operation)
   }
 
-  async considerWorkerComplete(input: ConsiderInput): Promise<ConsiderResult> {
+  /**
+   * Judge a worker complete without calling `ctx.goals.complete`.
+   * `completed: true` means APPROVED and the identity fence still holds.
+   * The `update_goal` wrap uses this, then the original execute commits.
+   */
+  async certify(input: ConsiderInput): Promise<ConsiderResult> {
     const goal = this.options.getGoal(input.agent)
     const fence = identityFence(input.ref.id, input.ref.revision, input.reply)
     if (goal === undefined || goal.phase !== 'active') {
@@ -115,8 +121,27 @@ export class CompletionCertifier {
       return { completed: false, verdict, fence }
     }
 
-    this.options.complete(input.agent, { id: latest.id, revision: latest.revision })
     return { completed: true, verdict, fence }
+  }
+
+  /**
+   * ACP / marker path: certify, then commit through the injected complete verb.
+   * The tool wrap must not use this — original `update_goal` execute owns complete.
+   */
+  async considerWorkerComplete(input: ConsiderInput): Promise<ConsiderResult> {
+    const result = await this.certify(input)
+    if (!result.completed) return result
+    const latest = this.options.getGoal(input.agent)
+    if (
+      latest === undefined
+      || latest.phase !== 'active'
+      || latest.id !== result.fence.goalId
+      || latest.revision !== result.fence.revision
+    ) {
+      return { completed: false, verdict: result.verdict, fence: result.fence }
+    }
+    this.options.complete(input.agent, { id: latest.id, revision: latest.revision })
+    return result
   }
 
   private async judge(goal: GoalView, input: ConsiderInput, controller: AbortController): Promise<Verdict> {
@@ -129,6 +154,7 @@ export class CompletionCertifier {
         revision: goal.revision,
         objective: goal.objective,
         reply: input.reply,
+        parent: input.agent,
         ...input.proof === undefined ? {} : { proof: input.proof },
       }, controller.signal)
     } catch (error: unknown) {
