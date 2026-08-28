@@ -1,7 +1,6 @@
-# Lumine preset bundle. Disables the default DeepSeek agent-loop so an ACP
-# product (Claude Code, Codex, Cursor, or Grok Build) owns the session.
-# Later layers win by id; ctx.agents.setFactory() is a unary slot.
+# Lumine ACP bundle. Later layers win by id; ctx.agents.setFactory() is a unary slot.
 
+# Replace the default DeepSeek agent-loop so an official ACP product owns the session.
 - id: agent-loop
   disabled: true
 
@@ -11,3 +10,25 @@
       config:
         permission: yolo
         defaultProvider: claude
+
+# Pin the in-page browse directory picker. directory-picker-auto picks native on
+# darwin; a detached `dsh` never shows the macOS dialog, so "+ Add workspace"
+# appears to do nothing. Same-id name rewrite is not the seam — disable+insert.
+- id: directory-picker
+  name: '@deepseek-ai/dsh-host-directory-picker-auto'
+  disabled: true
+
+- insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: ui-directory-picker-browse
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+
+# Skip official DeepSeek key onboarding. llm-deepseek's schema defaults
+# apiKeyEnv to DEEPSEEK_API_KEY (empty string fails credentialRef), which
+# keeps onboardingReadiness at credential-missing. Disabling the adapter
+# makes the step adapter-absent, which auto-completes. Re-enable this row
+# and set a real key in Settings if you want DeepSeek-native sessions later.
+# Do not write a fake DEEPSEEK_API_KEY or touch .credentials.yaml.
+- id: llm-deepseek
+  disabled: true

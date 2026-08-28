@@ -1,5 +1,5 @@
 # One-by-one install of @lumine/dsh-acp-session. Same seam as the root
-# lumine-dsh bundle: disable the default loop, insert this factory.
+# lumine-dsh bundle: ACP factory, in-page browse picker, no DeepSeek key gate.
 
 - id: agent-loop
   disabled: true
@@ -10,3 +10,16 @@
       config:
         permission: yolo
         defaultProvider: claude
+
+- id: directory-picker
+  name: '@deepseek-ai/dsh-host-directory-picker-auto'
+  disabled: true
+
+- insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: ui-directory-picker-browse
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+
+- id: llm-deepseek
+  disabled: true

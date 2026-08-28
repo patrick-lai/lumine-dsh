@@ -25,7 +25,7 @@ No API keys. `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` are not inje
 
 DSH's default `@deepseek-ai/dsh-agent-loop` is the host-plane **Agent factory**. `ctx.agents.setFactory()` is a unary slot and throws if a factory is already registered. Presets cannot publish host-plane services. An LLM adapter would still run DSH's tool loop. `@deepseek-ai/dsh-subagent-acp` is a one-shot *child* that returns only final text and does **not** put intermediate traffic in the parent log.
 
-So this plugin **replaces the Agent factory**:
+So this plugin **replaces the Agent factory**, pins the in-page workspace picker, and skips DeepSeek key onboarding:
 
 ```yaml
 - id: agent-loop
@@ -33,7 +33,21 @@ So this plugin **replaces the Agent factory**:
 - insert:
     - id: lumine-acp-session
       name: '@lumine/dsh-acp-session'
+- id: directory-picker
+  name: '@deepseek-ai/dsh-host-directory-picker-auto'
+  disabled: true
+- insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: ui-directory-picker-browse
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+- id: llm-deepseek
+  disabled: true
 ```
+
+`directory-picker-auto` picks the native macOS dialog on darwin. A detached `dsh` never shows that dialog, so "+ Add workspace" looks dead. The seam is disable+insert of browse (same-id name rewrite is not how later layers swap this row). Clicking an existing workspace still uses `onPick`.
+
+ACP sessions do not need a DeepSeek API key. The official adapter's schema defaults `apiKeyEnv` to `DEEPSEEK_API_KEY`; an empty/unset value is not a valid credential-ref and would crash plugin load. Disabling `llm-deepseek` makes first-run onboarding `adapter-absent`, which auto-completes. We do not write a fake `DEEPSEEK_API_KEY` and we do not touch `.credentials.yaml`. Re-enable `id: llm-deepseek` and set a real key in Settings if you want DeepSeek-native sessions later.
 
 Community pattern: `dsh-loop-dock`. v1 is an ACP-only profile (DeepSeek-native sessions in the same process would register as a loop-dock driver later).
 
