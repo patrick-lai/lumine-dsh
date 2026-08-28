@@ -33,6 +33,7 @@ declare module '@deepseek-ai/cordis' {
         result: Promise<{
           output?: Array<{ type?: string; text?: string }>
           stopReason?: string
+          diagnostic?: string
         }>
         dispose(): Promise<void> | void
       }>

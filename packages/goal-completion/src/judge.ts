@@ -1,10 +1,11 @@
 /**
  * Isolated read-only judge. CI / tests use a fake. Runtime calls
  * `ctx.subagents.start(name, { prompt: ContentBlock[], parent, signal, toolFilter? })`
- * — the published `@deepseek-ai/dsh-subagent` shape. Prefer a provider with
- * `toolFilter` and a different LLM product than the worker when available.
- * Missing `start()` fail-closes UNVERIFIABLE. Generation never goes through
- * a fabricated DeepSeek key.
+ * — the published `@deepseek-ai/dsh-subagent` shape. Pick a provider that is
+ * actually registered (`list()` / a real `getProvider().start`). Grok-build
+ * hosts typically have spawn / spawn-in-process / fork, not a nestable `acp`
+ * child. Missing `start()` fail-closes UNVERIFIABLE. Generation never goes
+ * through a fabricated DeepSeek key.
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -12,14 +13,14 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CompletionCandidate, JudgeFn, ResolvedConfig, Verdict } from './config.ts'
 import { DEFAULT_START_TIMEOUT_MS } from './config.ts'
 import { VERDICT_MARKER, parseJudgeOutput } from './markers.ts'
-import { isLumineAcpSession } from './session.ts'
 
 export const CI_FAKE_REASON = 'CI fake judge does not certify'
 
-const PREFERRED_START_PROVIDERS = ['spawn', 'fork', 'spawn-in-process'] as const
-const ACP_PREFERRED_START_PROVIDERS = ['acp', ...PREFERRED_START_PROVIDERS] as const
+/** Process providers first. `acp` is last: grok-build list() usually has spawn, not acp. */
+const PREFERRED_START_PROVIDERS = ['spawn', 'spawn-in-process', 'fork', 'acp'] as const
 
 export const START_DID_NOT_SETTLE = 'subagents.start did not settle'
+export const JUDGE_REASON_MAX = 240
 
 const WRITE_TOOL_NAMES = new Set([
   'bash',
@@ -131,28 +132,67 @@ export function judgeToolFilter(ctx: Context): { allow?: string[]; deny?: string
   return { allow: [] }
 }
 
+function listedProviders(subagents: NonNullable<Context['subagents']>): string[] {
+  if (typeof subagents.list !== 'function') return []
+  const names = subagents.list()
+  return Array.isArray(names) ? names.filter((name): name is string => typeof name === 'string' && name.length > 0) : []
+}
+
+/** A stub `getProvider('acp')` (truthy, no `start`) is not a registered provider. */
+export function isLiveStartProvider(subagents: NonNullable<Context['subagents']>, name: string): boolean {
+  const names = listedProviders(subagents)
+  if (names.includes(name)) return true
+  if (names.length > 0) return false
+  const provider = subagents.getProvider?.(name)
+  return Boolean(provider && typeof (provider as { start?: unknown }).start === 'function')
+}
+
+/**
+ * Prefer a process provider that `list()` actually has. Do not prefer `acp`
+ * on a lumine ACP / grok-build parent — that session is the worker, not an
+ * `acp` subagent provider. Empty `list()` plus a stub `getProvider('acp')`
+ * must not call `start('acp')`.
+ */
 export function pickStartProvider(
   subagents: NonNullable<Context['subagents']>,
-  worker?: { session?: { header?: { agentPreset?: string }; events?: ReadonlyArray<{ type: string; data?: unknown }> } },
+  _worker?: { session?: { header?: { agentPreset?: string }; events?: ReadonlyArray<{ type: string; data?: unknown }> } },
 ): string | undefined {
-  const names = typeof subagents.list === 'function' ? subagents.list() : []
-  const available = new Set(names)
-  const preferred = isLumineAcpSession(worker?.session)
-    ? ACP_PREFERRED_START_PROVIDERS
-    : PREFERRED_START_PROVIDERS
-  const supportsFilter = (name: string): boolean | undefined => {
-    const provider = subagents.getProvider?.(name)
-    return provider?.capabilities?.toolFilter
-  }
-  for (const name of preferred) {
-    if (names.length > 0 && !available.has(name)) continue
-    if (names.length === 0 && !subagents.getProvider?.(name)) continue
-    if (supportsFilter(name) !== false) return name
-  }
-  for (const name of names) {
-    if (supportsFilter(name)) return name
+  const names = listedProviders(subagents)
+  for (const name of PREFERRED_START_PROVIDERS) {
+    if (isLiveStartProvider(subagents, name)) return name
   }
   return names[0]
+}
+
+export function truncateJudgeReason(message: string): string {
+  const collapsed = message.replace(/\s+/g, ' ').trim()
+  if (!collapsed) return 'the isolated judge threw'
+  if (collapsed.length <= JUDGE_REASON_MAX) return collapsed
+  return `${collapsed.slice(0, JUDGE_REASON_MAX)}…`
+}
+
+export function formatCaughtError(error: unknown): string {
+  if (error instanceof Error && error.message) return truncateJudgeReason(error.message)
+  return truncateJudgeReason(String(error))
+}
+
+type JudgeRunResult = {
+  output?: Array<{ type?: string; text?: string }>
+  text?: string
+  stopReason?: string
+  diagnostic?: string
+}
+
+function judgeTextFromResult(result: JudgeRunResult): string {
+  const fromBlocks = contentBlocksToText(result.output)
+  if (fromBlocks) return fromBlocks
+  return typeof result.text === 'string' ? result.text : ''
+}
+
+/** Published `run.result` is `Promise<SubagentResult>` (`output`, `stopReason`, optional `diagnostic`). */
+async function awaitPublishedResult(run: { result?: unknown }): Promise<JudgeRunResult> {
+  if (run.result == null) throw new Error('subagent run.result is missing')
+  return await run.result as JudgeRunResult
 }
 
 /** Race a start()/result promise against abort + a wall-clock watchdog. */
@@ -249,25 +289,31 @@ export function createRuntimeJudge(ctx: Context, config: ResolvedConfig, worker?
       parent,
       signal,
     }
-    if (provider?.capabilities?.toolFilter !== false) request.toolFilter = toolFilter
-    if (chosen && provider?.capabilities?.agentOptions) request.agentOptions = { provider: chosen }
+    if (provider?.capabilities?.toolFilter === true) request.toolFilter = toolFilter
+    if (chosen && provider?.capabilities?.agentOptions === true) request.agentOptions = { provider: chosen }
 
     const startTimeoutMs = config.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS
     let run: Awaited<ReturnType<NonNullable<NonNullable<Context['subagents']>['start']>>> | undefined
     try {
       ctx.logger.info(`lumine-goal-completion: starting judge via subagents.start(${providerName})`)
       run = await raceStart(subagents.start(providerName, request), signal, startTimeoutMs)
-      const result = await raceStart(Promise.resolve(run.result), signal, config.timeoutMs, 'the isolated judge did not finish')
+      const result = await raceStart(awaitPublishedResult(run), signal, config.timeoutMs, 'the isolated judge did not finish')
+      if (result.stopReason === 'error') {
+        const diagnostic = typeof result.diagnostic === 'string' && result.diagnostic.trim()
+          ? truncateJudgeReason(result.diagnostic)
+          : 'the isolated judge stopped: error'
+        return { decision: 'UNVERIFIABLE', reason: diagnostic }
+      }
       if (result.stopReason && result.stopReason !== 'completed') {
         return { decision: 'UNVERIFIABLE', reason: `the isolated judge stopped: ${result.stopReason}` }
       }
-      return foldJudgeText(contentBlocksToText(result.output))
+      return foldJudgeText(judgeTextFromResult(result))
     } catch (error: unknown) {
       if (signal.aborted) return { decision: 'UNVERIFIABLE', reason: 'verification was cancelled' }
-      const message = error instanceof Error ? error.message : String(error)
+      const message = formatCaughtError(error)
       ctx.logger.warn(`lumine-goal-completion: judge subagent failed: ${message}`)
       if (message === START_DID_NOT_SETTLE) return { decision: 'UNVERIFIABLE', reason: START_DID_NOT_SETTLE }
-      return { decision: 'UNVERIFIABLE', reason: 'the isolated judge did not finish' }
+      return { decision: 'UNVERIFIABLE', reason: message }
     } finally {
       try {
         await run?.dispose()

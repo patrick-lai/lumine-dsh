@@ -39,8 +39,8 @@ describe('production apply() inject shape', () => {
       tools: { schemas: () => [{ name: 'read' }] },
       subagents: {
         start,
-        list: () => ['acp', 'spawn'],
-        getProvider: (name: string) => ({ name, capabilities: { toolFilter: true } }),
+        list: () => ['spawn'],
+        getProvider: (name: string) => ({ name, capabilities: { toolFilter: name === 'spawn' } }),
       },
       inject(_deps: string[], callback: (inner: typeof ctx) => void) {
         callback(ctx)
@@ -59,7 +59,7 @@ describe('production apply() inject shape', () => {
       await listener(session, session.events.find(event => event.type === 'turn/end'))
     }
     expect(start).toHaveBeenCalledOnce()
-    expect(start.mock.calls[0]?.[0]).toBe('acp')
+    expect(start.mock.calls[0]?.[0]).toBe('spawn')
     expect(complete).toHaveBeenCalledOnce()
     expect(goal.phase).toBe('complete')
   })
