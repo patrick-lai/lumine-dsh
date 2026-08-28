@@ -31,7 +31,12 @@ export interface RoutineServiceOptions extends ResolvedConfig {
  * gateway SRC-discovers `routine/list` and friends.
  */
 export class RoutineService extends TypertRemoteService {
-  static inject = ['agents']
+  /**
+   * Every hard `this.ctx.*` / `ctx.*` (not `ctx.get`) this fiber reads.
+   * Official `ctx.interval` is mixed in by `timer`. Nested `ctx.inject`
+   * is exclusive and never runs if the constructor already threw.
+   */
+  static inject = ['agents', 'timer', 'sessions']
 
   store: RoutineStore
   runtime: RoutineRuntime
@@ -39,6 +44,7 @@ export class RoutineService extends TypertRemoteService {
   private readonly now: () => number
   private readonly pending = new Set<Promise<void>>()
   private started = false
+  private timerInstalled = false
   private toolsRegistered = false
   private readonly persistOverride?: RoutinePersist
 
@@ -58,7 +64,6 @@ export class RoutineService extends TypertRemoteService {
       void this.start()
       return () => this.stop()
     }, 'lumineRoutines.start()')
-    this.installTimer()
     this.installTools()
   }
 
@@ -140,6 +145,7 @@ export class RoutineService extends TypertRemoteService {
     }
     await this.ensureLoaded()
     this.started = true
+    this.installTimer()
     await this.tick()
   }
 
@@ -164,45 +170,39 @@ export class RoutineService extends TypertRemoteService {
 
   /**
    * Use the existing cordis timer plugin (`ctx.interval`). Do not wrap a
-   * second timer service (`setInterval`).
+   * second timer service (`setInterval`). Called from `start()` after this
+   * fiber already has `timer` on `static inject` — never probe
+   * `this.ctx.interval` from the constructor.
    */
   private installTimer(): void {
-    const startTick = (host: { interval?: (callback: () => unknown, delay: number) => unknown }): void => {
-      if (typeof host.interval !== 'function') return
-      host.interval(() => {
-        void this.tick()
-      }, this.resolved.tickMs)
-    }
-    if (typeof this.ctx.interval === 'function') {
-      startTick(this.ctx)
-      return
-    }
-    this.ctx.inject(['timer'], timerCtx => {
-      startTick(timerCtx)
-    })
+    if (this.timerInstalled) return
+    this.ctx.interval(() => {
+      void this.tick()
+    }, this.resolved.tickMs)
+    this.timerInstalled = true
   }
 
   private installTools(): void {
+    const warn = (message: string): void => {
+      this.ctx.get<{ warn(...args: unknown[]): void }>('logger')?.warn(message)
+    }
     const register = (host: { tools?: { register?: (tool: unknown) => unknown }; logger?: { warn(...args: unknown[]): void } }): void => {
       if (this.toolsRegistered) return
       try {
         const names = registerRoutineTools(host, this.runtime)
         if (names.length > 0) this.toolsRegistered = true
       } catch (error) {
-        this.ctx.logger.warn(
-          `lumine-routines: tools.register failed: ${error instanceof Error ? error.message : String(error)}`,
-        )
+        warn(`lumine-routines: tools.register failed: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
+    const tools = this.ctx.get<{ register?: (tool: unknown) => unknown }>('tools')
+    if (tools) register({ tools, logger: this.ctx.get('logger') as { warn(...args: unknown[]): void } | undefined })
     try {
-      register(this.ctx)
       this.ctx.inject(['tools'], toolsCtx => {
         register(toolsCtx)
       })
     } catch (error) {
-      this.ctx.logger.warn(
-        `lumine-routines: tools inject failed: ${error instanceof Error ? error.message : String(error)}`,
-      )
+      warn(`lumine-routines: tools inject failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 }

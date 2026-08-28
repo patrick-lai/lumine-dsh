@@ -30,6 +30,8 @@ describe('built loader entry', () => {
     expect(built).not.toMatch(/['"]schedule_create['"]/)
     expect(built).toMatch(/routine_list/)
     expect(built).toMatch(/routine_run_now/)
+    expect(built).toMatch(/inject\s*=\s*\[\s*["']agents["']\s*,\s*["']timer["']\s*,\s*["']sessions["']\s*\]/)
+    expect(built).not.toMatch(/typeof \S+\.interval/)
   })
 
   it('ships a lazy-CJS client factory for the Routines settings section', () => {

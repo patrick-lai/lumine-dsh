@@ -4,9 +4,13 @@ vi.mock('../src/service.ts', () => ({
   RoutineService: class RoutineService {},
 }))
 
-import { apply, resolveConfig } from '../src/plugin.ts'
+import { apply, inject, resolveConfig } from '../src/plugin.ts'
 
 describe('plugin apply mounts the routine service', () => {
+  it('waits for agents, timer, and sessions before apply() mounts the child', () => {
+    expect(inject).toEqual(['agents', 'timer', 'sessions'])
+  })
+
   it('constructs RoutineService with grok-build defaults and a 30s tick', () => {
     const plugins: unknown[] = []
     const ctx = {

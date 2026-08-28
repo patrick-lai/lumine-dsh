@@ -16,7 +16,8 @@ import { resolveConfig, type Config } from './config.ts'
 import { RoutineService } from './service.ts'
 
 export const name = 'lumine-routines'
-export const inject = ['agents']
+/** Same required services as `RoutineService.inject`. `apply` only mounts the child. */
+export const inject = ['agents', 'timer', 'sessions']
 
 export type { Config } from './config.ts'
 export { resolveConfig } from './config.ts'
