@@ -27,5 +27,27 @@ describe('built loader entry', () => {
     expect(built).not.toMatch(/['"]schedule_create['"]/)
     expect(built).toMatch(/routine_list/)
     expect(built).toMatch(/routine_run_now/)
+    expect(built).toMatch(/remoteExportEnable/)
+    expect(built).toMatch(/routine\.enable/)
+  })
+
+  it('ships a lazy-CJS client factory for the Routines settings section', () => {
+    const client = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+    expect(client).toMatch(/window\.__ModuleLoader__\.load/)
+    expect(client).toMatch(/@lumine\/dsh-routines/)
+    expect(client).toMatch(/settings\.section/)
+    expect(client).toMatch(/routines/)
+    expect(client).toMatch(/No routines yet\./)
+    expect(client).not.toMatch(/@deepseek-ai\/dsh-client-ui-settings\/client/)
+    expect(client).not.toMatch(/from ["']@deepseek-ai\/dsh-client-ui-settings["']/)
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      dsh?: { client?: { platform?: string; inject?: string[] } }
+      exports?: Record<string, unknown>
+    }
+    expect(manifest.dsh?.client?.platform).toBe('web')
+    expect(manifest.dsh?.client?.inject).toEqual(expect.arrayContaining([
+      '@deepseek-ai/dsh-client-ui-settings',
+    ]))
+    expect(manifest.exports?.['./client']).toBeDefined()
   })
 })

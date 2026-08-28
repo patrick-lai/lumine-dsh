@@ -5,6 +5,8 @@ import { filePersist, openPersist, type RoutinePersist } from './persist.ts'
 import { RoutineRuntime } from './runtime.ts'
 import { RoutineStore } from './store.ts'
 import { registerRoutineTools } from './tools.ts'
+import { exportRoutineRemote } from './remote.ts'
+import { routineRpcHandlers } from './rpc-payload.ts'
 import type { CreateRoutineInput, Routine, UpdateRoutineInput } from './types.ts'
 import { RoutineError } from './types.ts'
 
@@ -31,6 +33,8 @@ export class RoutineService extends Service {
   store: RoutineStore
   runtime: RoutineRuntime
   readonly resolved: ResolvedConfig
+  /** Visible Typert binding. Namespace is `routine` (endpoints `routine/list`). */
+  typertRemote?: { readonly service: object; readonly serviceKey: string; readonly namespace: string }
   private readonly now: () => number
   private readonly pending = new Set<Promise<void>>()
   private started = false
@@ -56,6 +60,56 @@ export class RoutineService extends Service {
     this.installTimer()
     this.installTools()
     this.tryExportRemote()
+  }
+
+  /**
+   * Typert / Settings adapters. Wire names stay `routine/list` etc.
+   * Payloads omit nil `nextRunAt` / `activeRun` / `sessionId`.
+   */
+  async remoteExportList(): Promise<{ routines: Routine[] }> {
+    return this.rpcHandlers().list()
+  }
+
+  async remoteExportCreate(input: CreateRoutineInput): Promise<{
+    routine: Routine
+    enabled: false
+    saved_paused: true
+    operator_must_enable: true
+  }> {
+    return this.rpcHandlers().create(input)
+  }
+
+  async remoteExportUpdate(id: string, input: UpdateRoutineInput): Promise<{
+    routine: Routine
+    enabled: false
+    saved_paused: true
+    operator_must_enable: true
+  }> {
+    return this.rpcHandlers().update(id, input)
+  }
+
+  async remoteExportDelete(id: string): Promise<{ deleted: Routine }> {
+    return this.rpcHandlers().delete(id)
+  }
+
+  async remoteExportEnable(id: string, enabled: boolean): Promise<{ routine: Routine }> {
+    return this.rpcHandlers().enable(id, enabled)
+  }
+
+  async remoteExportRunNow(id: string): Promise<{ routine?: Routine; sessionId?: string }> {
+    return this.rpcHandlers().runNow(id)
+  }
+
+  private rpcHandlers() {
+    return routineRpcHandlers({
+      list: () => this.list(),
+      create: input => this.create(input),
+      update: (id, input) => this.update(id, input),
+      delete: id => this.delete(id),
+      enable: (id, enabled) => this.enable(id, enabled),
+      runNow: id => this.runNow(id),
+      require: id => this.store.require(id),
+    })
   }
 
   private bindRuntime(): RoutineRuntime {
@@ -180,23 +234,16 @@ export class RoutineService extends Service {
   }
 
   /**
-   * Official DSH RPC is `TypertRemoteService` + `@Remote`. Mirror `routine.*`
-   * when a duck-typed rpc facility exists. `routine.enable` is host-only.
+   * Official DSH RPC is Typert `routine/<method>` plus duck-typed
+   * `rpc.register('routine.list')`. `routine.enable` is host-only.
    */
   private tryExportRemote(): void {
-    const methods = {
-      create: (input: CreateRoutineInput) => this.create(input),
-      list: () => this.list(),
-      update: (id: string, input: UpdateRoutineInput) => this.update(id, input),
-      delete: (id: string) => this.delete(id),
-      enable: (id: string, enabled: boolean) => this.enable(id, enabled),
-      runNow: (id: string) => this.runNow(id),
-    }
-    const rpc = this.ctx.get<{ register?: (name: string, handler: (...args: unknown[]) => unknown) => void }>('rpc')
-    if (rpc && typeof rpc.register === 'function') {
-      for (const [name, handler] of Object.entries(methods)) {
-        rpc.register(`routine.${name}`, handler)
-      }
+    try {
+      exportRoutineRemote(this.ctx, this, RoutineService)
+    } catch (error) {
+      this.ctx.logger.warn(
+        `lumine-routines: remote export failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
     }
   }
 }

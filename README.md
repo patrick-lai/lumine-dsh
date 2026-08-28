@@ -117,7 +117,7 @@ Model tools (never `schedule_*`, never `schedule/change`):
 - `routine_delete`
 - `routine_run_now` — refuses a paused row
 
-`routine.enable` is host RPC / settings only. The model cannot arm unattended work.
+`routine.enable` is host RPC / the Settings **Routines** section only. The model cannot arm unattended work. The tab lists persisted rows, lets the operator enable or pause them, run now (refuses while paused), and delete. Compact create lands paused. The client half lives on the same `@lumine/dsh-routines` package (`dsh.client`), so the section appears without editing the profile `cordis.patch.yml`.
 
 Clock: `once` | `interval(seconds)` | five-field cron | `manual`. Quiet hours are IANA (wrapping night arcs ok). Catch-up is one fire plus a missed-count note. Failed delivery retries up to 3 ticks, then advances.
 
@@ -175,8 +175,9 @@ lumine-dsh/                      # root bundle (dsh.bundle)
   packages/acp-session/          # @lumine/dsh-acp-session (dsh.bundle)
     src/                         # factory, ACP client, event map, command resolution
     presets/                     # four picker rows, no DSH tools
-  packages/routines/             # @lumine/dsh-routines (dsh.bundle)
+  packages/routines/             # @lumine/dsh-routines (dsh.bundle + dsh.client)
     src/                         # calendar, persist, RPC, timer, spawn
+    src/client/                  # Settings → Routines section
 ```
 
 ## Develop

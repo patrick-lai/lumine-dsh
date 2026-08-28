@@ -82,5 +82,7 @@ describe('catch-up fires exactly once', () => {
     expect(advanced.lastRunAt).toBe(Date.parse('2026-01-01T00:01:00Z'))
     expect(advanced.nextRunAt).toBe(Date.parse('2026-01-01T00:02:00Z'))
     expect(advanced.runs.at(-1)?.note).toMatch(/advanced after 3/)
+    expect('activeRun' in advanced).toBe(false)
+    expect(snapshotJsonValue(advanced)).toEqual(advanced)
   })
 })

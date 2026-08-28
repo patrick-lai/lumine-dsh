@@ -49,6 +49,19 @@ describe('routines bundle cordis overlay', () => {
     expect(tools).toMatch(/output:\s*\{[\s\S]*schema/)
     expect(tools).toMatch(/saved_paused/)
     expect(tools).toMatch(/operator_must_enable/)
+    expect(service).toMatch(/remoteExportEnable/)
+    expect(service).toMatch(/exportRoutineRemote/)
+  })
+
+  it('loads the Routines tab from the same package client half, not a profile overlay', () => {
+    const manifest = JSON.parse(patch('../package.json')) as {
+      dsh?: { client?: { platform?: string } }
+    }
+    expect(manifest.dsh?.client?.platform).toBe('web')
+    expect(pkg).not.toMatch(/id:\s*ui-lumine-routines/)
+    expect(pkg).not.toMatch(/dsh-client-ui-routines/)
+    expect(root).not.toMatch(/id:\s*ui-lumine-routines/)
+    expect(root).not.toMatch(/dsh-client-ui-routines/)
   })
 
   it('does not tell people to re-insert directory-picker-browse in a profile overlay', () => {

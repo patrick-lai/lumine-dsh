@@ -11,6 +11,10 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "default": "./lib/client.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -29,12 +33,21 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
     }
   },
   "scripts": {
-    "prepare": "tsdown --config tsdown.prepare.config.mjs --config-loader native && (node scripts/ensure-dsh-peers.mjs || true)",
-    "build": "tsdown --config tsdown.config.mjs --config-loader native",
-    "build:prepare": "tsdown --config tsdown.prepare.config.mjs --config-loader native",
+    "prepare": "tsdown --config tsdown.prepare.config.mjs --config-loader native && tsdown --config tsdown.client.config.mjs --config-loader native && (node scripts/ensure-dsh-peers.mjs || true)",
+    "build": "tsdown --config tsdown.config.mjs --config-loader native && tsdown --config tsdown.client.config.mjs --config-loader native",
+    "build:prepare": "tsdown --config tsdown.prepare.config.mjs --config-loader native && tsdown --config tsdown.client.config.mjs --config-loader native",
     "test": "vitest run"
   },
   "dependencies": {
