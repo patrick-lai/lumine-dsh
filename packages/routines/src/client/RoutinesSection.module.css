@@ -1,0 +1,21 @@
+/* Thin Settings pointer. Editor lives on the left-rail pane. */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 720px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.heading {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--dsw-alias-label-tertiary);
+}

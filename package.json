@@ -1,7 +1,7 @@
 {
   "name": "lumine-dsh",
   "version": "0.1.0",
-  "description": "Lumine capabilities as DeepSeek Harness plugins. ACP sessions for Claude Code, Codex, Cursor, and Grok Build, plus fail-closed /goal completion.",
+  "description": "Lumine capabilities as DeepSeek Harness plugins. ACP sessions for Claude Code, Codex, Cursor, and Grok Build, plus fail-closed /goal completion, and host-owned durable routines.",
   "license": "MIT",
   "type": "module",
   "private": false,
@@ -21,7 +21,8 @@
     "claude-code",
     "codex",
     "cursor",
-    "grok-build"
+    "grok-build",
+    "routines"
   ],
   "files": [
     "cordis.patch.yml",
@@ -35,7 +36,11 @@
     "packages/goal-completion/package.json",
     "packages/goal-completion/cordis.patch.yml",
     "packages/goal-completion/lib",
-    "packages/goal-completion/scripts"
+    "packages/goal-completion/scripts",
+    "packages/routines/package.json",
+    "packages/routines/cordis.patch.yml",
+    "packages/routines/lib",
+    "packages/routines/scripts"
   ],
   "exports": {
     "./cordis.patch.yml": "./cordis.patch.yml",
@@ -47,12 +52,13 @@
     }
   },
   "scripts": {
-    "prepare": "pnpm --dir packages/acp-session run build:prepare && pnpm --dir packages/goal-completion run build:prepare",
-    "build": "pnpm --filter @lumine/dsh-acp-session --filter @lumine/dsh-goal-completion run build",
-    "test": "pnpm --filter @lumine/dsh-acp-session --filter @lumine/dsh-goal-completion run test"
+    "prepare": "pnpm --dir packages/acp-session run build:prepare && pnpm --dir packages/goal-completion run build:prepare && pnpm --dir packages/routines run build:prepare",
+    "build": "pnpm --filter @lumine/dsh-acp-session --filter @lumine/dsh-goal-completion --filter @lumine/dsh-routines run build",
+    "test": "pnpm --filter @lumine/dsh-acp-session --filter @lumine/dsh-goal-completion --filter @lumine/dsh-routines run test"
   },
   "dependencies": {
     "@lumine/dsh-acp-session": "file:packages/acp-session",
-    "@lumine/dsh-goal-completion": "file:packages/goal-completion"
+    "@lumine/dsh-goal-completion": "file:packages/goal-completion",
+    "@lumine/dsh-routines": "file:packages/routines"
   }
 }

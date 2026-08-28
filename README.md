@@ -2,10 +2,11 @@
 
 Lumine capabilities as [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins. This repository is the install home: `dsh plugin --profile web add github:patrick-lai/lumine-dsh` gets everything. Packages inside can also be installed one-by-one later.
 
-**Today that is two plugins:**
+**Today that is three plugins:**
 
 - `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
 - `@lumine/dsh-goal-completion` — the deferred DSH completion policy layer. A worker `update_goal` complete (or an ACP `GOAL REACHED` marker) is only a candidate until an isolated judge outputs `GOAL COMPLETION VERDICT: APPROVED`. Human `/goal` and RPC `goal.complete` stay operator-authoritative. This bundle disables host-plane `goal-round-driver` (the stock dsh-base row) so `dsh --dump-config` shows it absent from the mounted set; marker harvest owns continue on lumine ACP presets.
+- `@lumine/dsh-routines` — host-owned durable automations (calendar cron/interval, quiet hours, overlap guard, catch-up-once). The model can create paused rows only; an operator arms them. They sit **beside** official `@deepseek-ai/dsh-schedule`, which stays mounted as session-local reminders.
 
 Keyword for discovery: `dsh-plugin`.
 
@@ -33,9 +34,15 @@ So this plugin **replaces the Agent factory** and pins the in-page workspace pic
 ```yaml
 - id: agent-loop
   disabled: true
+- id: goal-round-driver
+  disabled: true
 - insert:
     - id: lumine-acp-session
       name: '@lumine/dsh-acp-session'
+    - id: lumine-goal-completion
+      name: '@lumine/dsh-goal-completion'
+    - id: lumine-routines
+      name: '@lumine/dsh-routines'
 - id: directory-picker
   name: '@deepseek-ai/dsh-host-directory-picker-auto'
   disabled: true
@@ -90,15 +97,41 @@ Local checkout:
 dsh plugin --profile web add link:/absolute/path/to/lumine-dsh
 ```
 
-A `link:` install loads `@lumine/dsh-acp-session` from its real path. Node will not see `@deepseek-ai/cordis` in the profile `node_modules` unless those peers are linked into `packages/acp-session/node_modules`. The package entry runs `ensureDshPeers()` (honors `DSH_HOME` / `DSH_PROFILE`) before importing the plugin; you can also run `node packages/acp-session/scripts/ensure-dsh-peers.mjs`.
+A `link:` install loads `@lumine/dsh-acp-session`, `@lumine/dsh-goal-completion`, and `@lumine/dsh-routines` from their real paths. Node will not see `@deepseek-ai/cordis` in the profile `node_modules` unless those peers are linked into each package `node_modules`. Each package entry runs `ensureDshPeers()` (honors `DSH_HOME` / `DSH_PROFILE`) before importing the plugin; you can also run `node packages/acp-session/scripts/ensure-dsh-peers.mjs`, `node packages/goal-completion/scripts/ensure-dsh-peers.mjs`, or `node packages/routines/scripts/ensure-dsh-peers.mjs`.
 
 One package only:
 
 ```sh
 dsh plugin --profile web add link:/absolute/path/to/lumine-dsh/packages/acp-session
+dsh plugin --profile web add link:/absolute/path/to/lumine-dsh/packages/goal-completion
+dsh plugin --profile web add link:/absolute/path/to/lumine-dsh/packages/routines
 ```
 
 Then `dsh --profile web`. New session → pick **Claude Code**, **Codex**, **Cursor**, or **Grok Build**.
+
+## Routines
+
+`@lumine/dsh-routines` is a host-plane store. A routine survives process restart and fires even when no chat is open. It is **not** `@deepseek-ai/dsh-schedule`. That official package stays mounted for same-session reminders (`schedule_list` / `schedule_create`). A routine fire is a **new** DSH session; the authoring session must still have an empty schedule fold.
+
+There is no `/routine` slash. Command palette in Lumine only opens a stage; DSH does not need that chrome.
+
+Model tools (never `schedule_*`, never `schedule/change`):
+
+- `routine_list`
+- `routine_create` — always persists `enabled: false`
+- `routine_update` — always persists `enabled: false`
+- `routine_delete`
+- `routine_run_now` — refuses a paused row
+
+`routine/enable` is host RPC / the left-rail **Routines** pane only (`TypertRemoteService` namespace `routine`). The model cannot arm unattended work. The pane lists persisted rows and edits title, prompt, cron/interval/once/manual, IANA timezone, quiet hours, and max runs. Enable, pause, run now (refuses while paused), and delete are operator-only. Create lands paused. The client half lives on the same `@lumine/dsh-routines` package (`dsh.client`) as a `sidebar.footer.action`, so the rail control appears without editing the profile `cordis.patch.yml`.
+
+Clock: `once` | `interval(seconds)` | five-field cron | `manual`. Quiet hours are IANA (wrapping night arcs ok). Catch-up is one fire plus a missed-count note. Failed delivery retries up to 3 ticks, then advances.
+
+Fire calls the already-registered Agent factory (`lumine-acp-session` or the stock loop). The first user message is the rendered prompt (`{{KEY}}` / `${KEY}` plus `SCHEDULE_ID`, `SCHEDULE_TITLE`, `NOW_ISO`). `routineId` is stamped on `request/context`.
+
+State lives in `ctx.storageDomain` when that service exists, otherwise `$DSH_HOME/lumine-routines/routines.json` at mode `0600`. The tick is `ctx.interval(30000)` via the existing cordis timer plugin.
+
+The package-only overlay (`packages/routines/cordis.patch.yml`) inserts this plugin only. It does not disable `agent-loop` (ACP session already does) and it does not re-insert `directory-picker-browse`.
 
 ## CLI prerequisites
 
@@ -152,6 +185,9 @@ lumine-dsh/                      # root bundle (dsh.bundle)
     presets/                     # four picker rows, no DSH tools
   packages/goal-completion/      # @lumine/dsh-goal-completion (dsh.bundle)
     src/                         # certifier, update_goal wrap, ACP marker fallback
+  packages/routines/             # @lumine/dsh-routines (dsh.bundle + dsh.client)
+    src/                         # calendar, persist, RPC, timer, spawn
+    src/client/                  # left-rail Routines pane
 ```
 
 ## Develop

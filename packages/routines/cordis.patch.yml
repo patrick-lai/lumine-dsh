@@ -1,0 +1,18 @@
+# One-by-one install of @lumine/dsh-routines. This plugin only.
+#
+# Do not disable agent-loop here — @lumine/dsh-acp-session already owns that
+# swap on the root bundle and on its own package overlay. Routines sit beside
+# the ACP factory and beside official @deepseek-ai/dsh-schedule.
+#
+# The root lumine-dsh bundle already inserts directory-picker-browse. Do not
+# repeat that insert here.
+#
+# Do not disable llm-deepseek. Empty apiKeyEnv already skips the key gate.
+
+- insert:
+    - id: lumine-routines
+      name: '@lumine/dsh-routines'
+      config:
+        defaultPreset: grok-build
+        tickMs: 30000
+        staleAfterMs: 21600000
