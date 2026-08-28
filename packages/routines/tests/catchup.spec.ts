@@ -18,6 +18,7 @@ describe('catch-up fires exactly once', () => {
     }, Date.parse('2026-01-01T00:00:00Z'))
     expect(created.enabled).toBe(false)
     expect(created.nextRunAt).toBeUndefined()
+    expect('nextRunAt' in created).toBe(false)
 
     const armed = await store.enable(created.id, true, Date.parse('2026-01-01T00:00:00Z'))
     expect(armed.nextRunAt).toBe(Date.parse('2026-01-01T00:01:00Z'))

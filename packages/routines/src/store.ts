@@ -1,4 +1,5 @@
 import { MAX_DELIVERY_FAILURES } from './config.ts'
+import { omitUndefined } from './json.ts'
 import { defaultTimeZone } from './timezone.ts'
 import { assertRule, beginRun, endRunMatches, isActiveRunBlocking, missedFireCount, nextRun, shouldFire } from './calendar.ts'
 import type { RoutinePersist } from './persist.ts'
@@ -89,7 +90,7 @@ export class RoutineStore {
   async update(id: string, input: UpdateRoutineInput, now = Date.now()): Promise<Routine> {
     const current = this.require(id)
     const timezone = input.timezone?.trim() || current.timezone
-    const next: Routine = {
+    const next: Routine = omitUndefined({
       ...current,
       enabled: false,
       ...input.title !== undefined ? { title: requireText(input.title, 'title') } : {},
@@ -111,7 +112,7 @@ export class RoutineStore {
       workspaceCwd: input.workspaceCwd === null ? undefined : input.workspaceCwd ?? current.workspaceCwd,
       preset: input.preset === null ? undefined : input.preset ?? current.preset,
       updatedAt: now,
-    }
+    })
     const routine = withNextRun(next, now)
     this.routines.set(id, routine)
     await this.flush()
@@ -239,27 +240,26 @@ export class RoutineStore {
 
 function recoverOnLoad(routine: Routine, now: number, staleAfterMs: number): Routine {
   const stale = routine.activeRun !== undefined && !isActiveRunBlocking(routine.activeRun, new Date(now), staleAfterMs)
-  const next: Routine = {
-    ...routine,
+  const { activeRun, nextRunAt: _drop, ...base } = routine
+  const next: Routine = omitUndefined({
+    ...base,
     deliveryFailures: routine.deliveryFailures ?? 0,
     runs: routine.runs ?? [],
-    mode: 'cron',
-    ...stale ? { activeRun: undefined } : {},
-  }
-  const recomputed = nextRun(next, new Date(now))
-  if (
-    stale
-    || next.deliveryFailures !== routine.deliveryFailures
-    || next.nextRunAt !== recomputed?.getTime()
-  ) {
-    return { ...next, nextRunAt: recomputed?.getTime() }
-  }
-  return { ...next, nextRunAt: recomputed?.getTime() }
+    mode: 'cron' as const,
+    ...!stale && activeRun ? { activeRun } : {},
+  })
+  return assignNextRun(next, now)
+}
+
+/** Omit `nextRunAt` when there is no next fire. Never write `undefined`. */
+function assignNextRun(routine: Routine, now: number): Routine {
+  const stamp = nextRun(routine, new Date(now))?.getTime()
+  const { nextRunAt: _drop, ...rest } = routine
+  return omitUndefined(stamp === undefined ? rest : { ...rest, nextRunAt: stamp })
 }
 
 function withNextRun(routine: Routine, now: number): Routine {
-  const next = nextRun(routine, new Date(now))
-  return { ...routine, nextRunAt: next?.getTime(), updatedAt: now }
+  return assignNextRun({ ...routine, updatedAt: now }, now)
 }
 
 function withZone<T extends { timeZoneIdentifier?: string }>(window: T, timezone: string): T {

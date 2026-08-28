@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import { omitUndefined } from './json.ts'
 import type { RoutineRuntime } from './runtime.ts'
 import type { RoutineRule, ScheduleWindow } from './types.ts'
 import { RoutineError } from './types.ts'
@@ -217,7 +218,7 @@ function pausedPayload(routine: unknown): {
   saved_paused: true
   operator_must_enable: true
 } {
-  return { routine, enabled: false, saved_paused: true, operator_must_enable: true }
+  return omitUndefined({ routine, enabled: false, saved_paused: true, operator_must_enable: true })
 }
 
 export function createRoutineToolDefinitions(runtime: RoutineRuntime): RoutineToolDefinition[] {
@@ -233,7 +234,7 @@ export function createRoutineToolDefinitions(runtime: RoutineRuntime): RoutineTo
           properties: { routines: { type: 'array', required: true } },
         },
       },
-      execute: async () => ({ routines: runtime.list() }),
+      execute: async () => omitUndefined({ routines: runtime.list() }),
     }),
     defineRoutineTool({
       name: 'routine_create',
@@ -320,7 +321,7 @@ export function createRoutineToolDefinitions(runtime: RoutineRuntime): RoutineTo
       execute: async (args) => {
         const id = str(args.id)
         if (!id) fail('ROUTINE_INVALID', 'id is required')
-        return runtime.runNow(id)
+        return omitUndefined(await runtime.runNow(id))
       },
     }),
   ]

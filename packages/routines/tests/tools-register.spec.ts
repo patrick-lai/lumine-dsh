@@ -11,6 +11,7 @@ import {
   registerRoutineTools,
   type RoutineToolDefinition,
 } from '../src/tools.ts'
+import { snapshotJsonValue } from './snapshot-json.ts'
 
 /**
  * Published `ToolRuntime.register` (packages/core/tools/src/index.ts):
@@ -41,8 +42,10 @@ class ToolOutputError extends Error {
   }
 }
 
-function snapshotJsonValue(value: unknown): unknown {
-  return JSON.parse(JSON.stringify(value))
+function snapshotToolValue(toolName: string, candidate: unknown): unknown {
+  const detached = snapshotJsonValue(candidate)
+  if (detached === undefined) throw new ToolOutputError(toolName, ['value is not lossless JSON'])
+  return detached
 }
 
 function validateAgainstSchema(schema: Record<string, unknown>, value: unknown, path: string): string[] {
@@ -100,7 +103,7 @@ function createRegistry() {
         arguments: input.arguments ?? {},
         signal: new AbortController().signal,
       })
-      const detached = snapshotJsonValue(returned)
+      const detached = snapshotToolValue(tool.name, returned)
       const violations = validateAgainstSchema(tool.output.schema as Record<string, unknown>, detached, 'value')
       if (violations.length > 0) throw new ToolOutputError(tool.name, violations)
       const content = tool.output.render(input.arguments ?? {}, detached)
@@ -155,6 +158,53 @@ describe('defineTool + official register contract', () => {
     expect(created.value).not.toHaveProperty('content')
     expect(created.value).not.toHaveProperty('isError')
     expect((created.value as { routine: { promptTemplate: string } }).routine.promptTemplate).toBe('Review the inbox')
+    expect('nextRunAt' in (created.value as { routine: object }).routine).toBe(false)
+  })
+
+  it('createSuccessResult rejects own enumerable undefined the way the host does', () => {
+    expect(snapshotJsonValue({ nextRunAt: undefined })).toBeUndefined()
+    expect(snapshotJsonValue({ routines: [{ nextRunAt: undefined }] })).toBeUndefined()
+    expect(snapshotJsonValue({ routines: [] })).toEqual({ routines: [] })
+  })
+
+  it('paused routine_create (manual/interval/once) then routine_list survive createSuccessResult', async () => {
+    const runtime = await runtimeAt()
+    const registry = createRegistry()
+    for (const tool of createRoutineToolDefinitions(runtime)) registry.register(tool)
+
+    const clocks = [
+      { kind: 'manual' as const },
+      { kind: 'interval' as const, seconds: 60 },
+      { kind: 'once' as const, at: Date.parse('2026-02-01T12:00:00Z') },
+    ]
+    for (const [index, rule] of clocks.entries()) {
+      const created = await registry.execute({
+        name: 'routine_create',
+        arguments: {
+          title: `paused-${rule.kind}`,
+          promptTemplate: `ping ${index}`,
+          rule,
+        },
+      })
+      const routine = (created.value as { routine: Record<string, unknown>; enabled: boolean }).routine
+      expect(created.value).toMatchObject({
+        enabled: false,
+        saved_paused: true,
+        operator_must_enable: true,
+      })
+      expect(routine.enabled).toBe(false)
+      expect('nextRunAt' in routine).toBe(false)
+      expect(snapshotJsonValue(created.value)).toEqual(created.value)
+    }
+
+    const listed = await registry.execute({ name: 'routine_list', arguments: {} })
+    const routines = (listed.value as { routines: Array<Record<string, unknown>> }).routines
+    expect(routines).toHaveLength(3)
+    for (const routine of routines) {
+      expect(routine.enabled).toBe(false)
+      expect('nextRunAt' in routine).toBe(false)
+    }
+    expect(snapshotJsonValue(listed.value)).toEqual(listed.value)
   })
 
   it('createSuccessResult would ToolOutputError an MCP envelope against the list schema', async () => {

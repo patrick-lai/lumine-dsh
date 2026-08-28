@@ -25,6 +25,7 @@ describe('persist round-trip', () => {
 
     expect(created.enabled).toBe(false)
     expect(created.nextRunAt).toBeUndefined()
+    expect('nextRunAt' in created).toBe(false)
     expect(statSync(path).mode & 0o777).toBe(0o600)
 
     const reloaded = new RoutineStore(filePersist(path))
@@ -43,6 +44,7 @@ describe('persist round-trip', () => {
     })
     expect(again?.quietHours?.startMinute).toBe(22 * 60)
     expect(again?.nextRunAt).toBeUndefined()
+    expect(again && 'nextRunAt' in again).toBe(false)
 
     const armed = await reloaded.enable(created.id, true, Date.parse('2026-08-28T08:00:00Z'))
     expect(armed.enabled).toBe(true)
