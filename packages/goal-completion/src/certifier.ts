@@ -61,6 +61,10 @@ export class CompletionCertifier {
     this.inflight.delete(agentId)
   }
 
+  isJudging(agentId: string): boolean {
+    return this.inflight.has(agentId)
+  }
+
   onGoalChanged(agent: Agent, operation: string): void {
     if (CANCEL_OPERATIONS.has(operation)) this.cancel(agent.id, operation)
   }

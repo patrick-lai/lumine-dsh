@@ -4,7 +4,7 @@
  * already owns `blockedAfterConsecutiveRounds` on the tool path.
  */
 
-import { BLOCKED_MARKER, REACHED_MARKER } from './markers.ts'
+import { BLOCKED_MARKER, REACHED_MARKER, VERDICT_MARKER } from './markers.ts'
 
 export const PLUGIN_SOURCE = 'lumine-goal-completion'
 
@@ -68,4 +68,22 @@ export function pluginNotice(text: string, summary: string): {
     content: [{ type: 'text', text }],
     source: { kind: 'plugin', plugin: PLUGIN_SOURCE, form: 'notice', summary },
   }
+}
+
+export function verdictLine(verdict: { decision: string; reason: string }): string {
+  return `${VERDICT_MARKER} ${verdict.decision} - ${verdict.reason}`
+}
+
+/**
+ * Persist a host-visible `GOAL COMPLETION VERDICT:` notice on the live
+ * session log. Do not `followup` — that is the harvest auto-continue path.
+ */
+export function recordVerdictNotice(
+  agent: { session?: { append?: (type: string, data: unknown) => unknown }; inject?: (message: unknown) => void },
+  verdict: { decision: string; reason: string },
+): string {
+  const text = verdictLine(verdict)
+  const notice = pluginNotice(text, text)
+  agent.session?.append?.('user/message', notice)
+  return text
 }

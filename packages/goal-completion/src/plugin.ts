@@ -29,7 +29,7 @@ export { createCertifier, CANCEL_OPERATIONS } from './certifier.ts'
 export { scanMarkers, parseJudgeOutput, REACHED_MARKER, BLOCKED_MARKER, VERDICT_MARKER } from './markers.ts'
 export { identityFence, replyFingerprint } from './fingerprint.ts'
 export { fakeJudge, judgePrompt, foldJudgeText, createRuntimeJudge } from './judge.ts'
-export { pinDirective, continueNudge, PLUGIN_SOURCE } from './pin.ts'
+export { pinDirective, continueNudge, PLUGIN_SOURCE, verdictLine, recordVerdictNotice } from './pin.ts'
 export {
   canMountAcpFallback,
   collectPluginIds,
@@ -124,13 +124,15 @@ export function apply(ctx: Context, config: Config = {}): void {
     live.on('session/event', (subject: unknown, event: unknown) => {
       const session = subject as Agent['session']
       const row = event as { type?: string; data?: unknown }
-      if (row?.type !== 'turn/end') return
+      // ACP `TurnProjector.finish` writes assistant/message then turn/end.
+      // Settle on either so a missed turn/end still starts the judge.
+      if (row?.type !== 'turn/end' && row?.type !== 'assistant/message') return
       const agent = live.agents.get(session.id)
       if (agent === undefined) return
       return fallbackFor(agent).onSettledTurn({
         agent,
-        session,
-        endKind: turnEndKind(row.data),
+        session: agent.session ?? session,
+        endKind: row.type === 'turn/end' ? turnEndKind(row.data) : undefined,
       }).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error)
         live.logger.warn(`lumine-goal-completion: ACP settle failed: ${message}`)

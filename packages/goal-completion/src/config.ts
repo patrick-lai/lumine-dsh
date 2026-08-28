@@ -11,8 +11,10 @@ export interface Config {
   /** Optional judge agent preset / product id (claude, grok, cursor, …). */
   judgePreset?: string
   /**
-   * Force the CI / test fake judge (always UNVERIFIABLE unless a `judge`
-   * function is also supplied). Implicitly true when `CI=true`.
+   * Force the test fake judge (always UNVERIFIABLE unless a `judge`
+   * function is also supplied). Tests must set this explicitly — never
+   * inferred from `CI=true`, or a live box with CI set would never call
+   * `subagents.start` and would harvest-nudge forever.
    */
   fakeJudge?: boolean
   /** Injectable judge. Tests pass a fake; runtime leaves this unset. */
@@ -53,12 +55,11 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new TypeError('timeoutMs must be a positive number')
   }
-  const ci = process.env.CI === 'true' || process.env.CI === '1'
   return {
     timeoutMs,
     failClosed: config.failClosed !== false,
     ...config.judgePreset === undefined ? {} : { judgePreset: config.judgePreset },
-    fakeJudge: config.fakeJudge === true || (config.judge === undefined && ci),
+    fakeJudge: config.fakeJudge === true,
     ...config.judge === undefined ? {} : { judge: config.judge },
   }
 }

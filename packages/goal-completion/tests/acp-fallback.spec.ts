@@ -2,8 +2,20 @@ import { describe, expect, it, vi } from 'vitest'
 import { createAcpFallback } from '../src/acp-fallback.ts'
 import { createCertifier } from '../src/certifier.ts'
 import { fakeJudge } from '../src/judge.ts'
-import { continueNudge } from '../src/pin.ts'
-import { acpBind, acpLog, assistantMessage, makeAgent, makeGoal, makeSession, turnEnd, userMessage } from './helpers.ts'
+import { continueNudge, verdictLine } from '../src/pin.ts'
+import { lastAssistantReply } from '../src/session.ts'
+import {
+  acpBind,
+  acpChunkLog,
+  acpLog,
+  assistantMessage,
+  makeAgent,
+  makeGoal,
+  makeSession,
+  sessionNoticeTexts,
+  turnEnd,
+  userMessage,
+} from './helpers.ts'
 
 describe('ACP marker harvest', () => {
   it('GOAL REACHED on an ACP-shaped log is a candidate; fake APPROVED completes once', async () => {
@@ -33,6 +45,104 @@ describe('ACP marker harvest', () => {
     expect(complete).toHaveBeenCalledOnce()
     expect(complete).toHaveBeenCalledWith(agent, { id: 'goal-1', revision: 1 })
     expect(followups).toHaveLength(0)
+    expect(sessionNoticeTexts(session)).toContain(
+      verdictLine({ decision: 'APPROVED', reason: 'checkout matches the objective' }),
+    )
+  })
+
+  it('GOAL REACHED + UNVERIFIABLE records a verdict notice and does not auto-continue', async () => {
+    const goal = makeGoal()
+    const complete = vi.fn()
+    const followups: Array<{ content: Array<{ text?: string }> }> = []
+    const session = makeSession(acpLog('Wrote pong.\nGOAL REACHED: file is exactly pong'))
+    const agent = makeAgent(session, followups)
+    const fallback = createAcpFallback({
+      certifier: createCertifier({
+        judge: fakeJudge('UNVERIFIABLE', 'no read-only judge is available'),
+        complete,
+        getGoal: () => goal,
+        timeoutMs: 1_000,
+        failClosed: true,
+      }),
+      goals: { get: () => goal, complete, block: vi.fn() },
+      sessionIsLumineAcp: true,
+      roundDriverPresent: false,
+    })
+    const result = await fallback.onSettledTurn({ agent, session, endKind: 'completed' })
+    expect(result.action).toBe('halt')
+    expect(complete).not.toHaveBeenCalled()
+    expect(followups).toHaveLength(0)
+    expect(sessionNoticeTexts(session)).toContain(
+      'GOAL COMPLETION VERDICT: UNVERIFIABLE - no read-only judge is available',
+    )
+    expect(goal.phase).toBe('active')
+
+    const second = await fallback.onSettledTurn({ agent, session, endKind: 'completed' })
+    expect(second.action).toBe('ignore')
+    expect(followups).toHaveLength(0)
+  })
+
+  it('does not auto-continue while a judge is in flight', async () => {
+    const goal = makeGoal()
+    let release!: (verdict: { decision: 'APPROVED'; reason: string }) => void
+    const followups: unknown[] = []
+    const session = makeSession(acpLog('GOAL REACHED: shipped'))
+    const agent = makeAgent(session, followups)
+    const fallback = createAcpFallback({
+      certifier: createCertifier({
+        judge: () => new Promise(resolve => {
+          release = resolve
+        }),
+        complete: vi.fn((nextAgent, ref) => {
+          goal.phase = 'complete'
+          return { ...goal, ...ref, phase: 'complete' as const }
+        }),
+        getGoal: () => goal,
+        timeoutMs: 5_000,
+        failClosed: true,
+      }),
+      goals: { get: () => goal, complete: vi.fn(), block: vi.fn() },
+      sessionIsLumineAcp: true,
+      roundDriverPresent: false,
+    })
+    const first = fallback.onSettledTurn({ agent, session, endKind: 'completed' })
+    const second = await fallback.onSettledTurn({ agent, session, endKind: 'completed' })
+    expect(second.action).toBe('ignore')
+    expect(followups).toHaveLength(0)
+    release({ decision: 'APPROVED', reason: 'ok' })
+    const result = await first
+    expect(result.action).toBe('complete')
+    expect(followups).toHaveLength(0)
+  })
+
+  it('chunk-only ACP log still finds line-start GOAL REACHED', async () => {
+    const goal = makeGoal()
+    const complete = vi.fn((nextAgent, ref) => {
+      goal.phase = 'complete'
+      return { ...goal, ...ref, phase: 'complete' as const }
+    })
+    const session = makeSession(acpChunkLog('Wrote pong.\nGOAL REACHED: file is exactly pong'))
+    expect(lastAssistantReply(session)).toContain('GOAL REACHED: file is exactly pong')
+    const fallback = createAcpFallback({
+      certifier: createCertifier({
+        judge: fakeJudge('APPROVED', 'file is exactly pong'),
+        complete,
+        getGoal: () => goal,
+        timeoutMs: 1_000,
+        failClosed: true,
+      }),
+      goals: { get: () => goal, complete, block: vi.fn() },
+      sessionIsLumineAcp: true,
+      roundDriverPresent: false,
+    })
+    const result = await fallback.onSettledTurn({
+      agent: makeAgent(session),
+      session,
+      endKind: 'completed',
+    })
+    expect(result.action).toBe('complete')
+    expect(complete).toHaveBeenCalledOnce()
+    expect(sessionNoticeTexts(session)).toContain('GOAL COMPLETION VERDICT: APPROVED - file is exactly pong')
   })
 
   it('records a continue nudge and does not complete when the marker is absent', async () => {

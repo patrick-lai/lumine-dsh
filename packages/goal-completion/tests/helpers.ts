@@ -114,3 +114,53 @@ export function acpLog(reply: string, source: { kind: string; plugin?: string } 
     turnEnd('completed'),
   ]
 }
+
+/** Published ACP shape: text lives in `assistant/chunk` text-deltas; message content is empty. */
+export function acpChunkLog(reply: string, source: { kind: string; plugin?: string } = { kind: 'user' }): SessionEvent[] {
+  return [
+    acpBind(),
+    { type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } },
+    userMessage('go', source),
+    {
+      type: 'assistant/chunk',
+      seq: 2,
+      time: 2,
+      data: { turn: 1, step: 1, chunk: { type: 'block-start', index: 0, blockType: 'text' } },
+    },
+    {
+      type: 'assistant/chunk',
+      seq: 3,
+      time: 3,
+      data: { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: reply } },
+    },
+    {
+      type: 'assistant/message',
+      seq: 4,
+      time: 4,
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          id: 'a-1',
+          role: 'assistant',
+          content: [],
+          source: { kind: 'model', provider: 'grok', model: 'grok-4.6' },
+        },
+      },
+    },
+    turnEnd('completed'),
+  ]
+}
+
+export function sessionNoticeTexts(session: { events: ReadonlyArray<{ type: string; data?: unknown }> }): string[] {
+  const texts: string[] = []
+  for (const event of session.events) {
+    if (event.type !== 'user/message') continue
+    const data = event.data as { content?: Array<{ text?: string }>; message?: { content?: Array<{ text?: string }> } } | undefined
+    const blocks = data?.content ?? data?.message?.content ?? []
+    for (const block of blocks) {
+      if (typeof block.text === 'string') texts.push(block.text)
+    }
+  }
+  return texts
+}

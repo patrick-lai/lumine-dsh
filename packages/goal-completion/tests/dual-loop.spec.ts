@@ -9,7 +9,7 @@ import {
   canMountAcpFallback,
   hasRoundDriver,
 } from '../src/session.ts'
-import { acpLog, makeAgent, makeGoal, makeSession, nativeLog } from './helpers.ts'
+import { acpLog, makeAgent, makeGoal, makeSession, nativeLog, sessionNoticeTexts } from './helpers.ts'
 
 const GROK_PRESET = readFileSync(new URL('../../acp-session/presets/grok-build/agent.cordis.yml', import.meta.url), 'utf8')
 
@@ -158,6 +158,110 @@ describe('ACP harvest mounts instead of the goal-round-driver on lumine presets'
     expect(complete).toHaveBeenCalledOnce()
     expect(complete).toHaveBeenCalledWith(agent, { id: 'goal-1', revision: 1 })
     expect(goal.phase).toBe('complete')
+    expect(sessionNoticeTexts(session)).toContain('GOAL COMPLETION VERDICT: APPROVED - file is exactly pong')
+  })
+
+  it('apply() on a settled ACP log with GOAL REACHED calls start() and records a verdict notice', async () => {
+    const goal = makeGoal()
+    const followups: Array<{ content?: Array<{ text?: string }> }> = []
+    const session = makeSession(acpLog('Wrote pong.\nGOAL REACHED: file is exactly pong'))
+    const agent = makeAgent(session, followups)
+    const listeners = new Map<string, Array<(...args: unknown[]) => unknown>>()
+    const complete = vi.fn((nextAgent, ref) => {
+      goal.phase = 'complete'
+      return { ...goal, ...ref, phase: 'complete' as const }
+    })
+    const start = vi.fn(async (_name: string, request: {
+      prompt: Array<{ type: string; text?: string }>
+      parent: unknown
+      signal: AbortSignal
+    }) => {
+      expect(request.parent).toBe(agent)
+      expect(request.prompt[0]?.text).toContain('ORIGINAL OBJECTIVE')
+      return {
+        result: Promise.resolve({
+          output: [{ type: 'text', text: 'GOAL COMPLETION VERDICT: APPROVED - file is exactly pong' }],
+          stopReason: 'completed',
+        }),
+        dispose: vi.fn(),
+      }
+    })
+    const ctx = {
+      logger: { warn() {}, info() {}, error() {} },
+      goals: {
+        get: () => goal,
+        complete,
+        block: vi.fn(),
+        disarm: vi.fn(),
+      },
+      agents: { get: () => agent },
+      subagents: {
+        start,
+        list: () => ['spawn'],
+        getProvider: () => ({ name: 'spawn', capabilities: { toolFilter: true } }),
+      },
+      get(name: string) {
+        return name === 'subagents' ? this.subagents : undefined
+      },
+      inject(_deps: string[], callback: (inner: typeof ctx) => void) {
+        callback(ctx)
+        return { dispose() {} }
+      },
+      on(event: string, listener: (...args: unknown[]) => unknown) {
+        const bucket = listeners.get(event) ?? []
+        bucket.push(listener)
+        listeners.set(event, bucket)
+        return () => {}
+      },
+    }
+    apply(ctx as never, { fakeJudge: false, timeoutMs: 50 })
+
+    for (const listener of listeners.get('session/event') ?? []) {
+      await listener(session, session.events.find(event => event.type === 'assistant/message'))
+      await listener(session, session.events.find(event => event.type === 'turn/end'))
+    }
+    expect(start).toHaveBeenCalledOnce()
+    expect(complete).toHaveBeenCalledOnce()
+    expect(complete).toHaveBeenCalledWith(agent, { id: 'goal-1', revision: 1 })
+    expect(sessionNoticeTexts(session)).toContain('GOAL COMPLETION VERDICT: APPROVED - file is exactly pong')
+    expect(followups.some(item => String(item.content?.[0]?.text ?? '').includes('auto-continue'))).toBe(false)
+  })
+
+  it('apply() missing start() emits UNVERIFIABLE and does not harvest-nudge', async () => {
+    const goal = makeGoal()
+    const followups: Array<{ content?: Array<{ text?: string }> }> = []
+    const session = makeSession(acpLog('GOAL REACHED: file is exactly pong'))
+    const agent = makeAgent(session, followups)
+    const listeners = new Map<string, Array<(...args: unknown[]) => unknown>>()
+    const complete = vi.fn()
+    const ctx = {
+      logger: { warn() {}, info() {}, error() {} },
+      goals: {
+        get: () => goal,
+        complete,
+        block: vi.fn(),
+        disarm: vi.fn(),
+      },
+      agents: { get: () => agent },
+      inject(_deps: string[], callback: (inner: typeof ctx) => void) {
+        callback(ctx)
+        return { dispose() {} }
+      },
+      on(event: string, listener: (...args: unknown[]) => unknown) {
+        const bucket = listeners.get(event) ?? []
+        bucket.push(listener)
+        listeners.set(event, bucket)
+        return () => {}
+      },
+    }
+    apply(ctx as never, { fakeJudge: false, timeoutMs: 50 })
+    for (const listener of listeners.get('session/event') ?? []) {
+      await listener(session, session.events.find(event => event.type === 'turn/end'))
+    }
+    expect(complete).not.toHaveBeenCalled()
+    expect(sessionNoticeTexts(session)).toContain('GOAL COMPLETION VERDICT: UNVERIFIABLE - no read-only judge is available')
+    expect(followups).toHaveLength(0)
+    expect(goal.phase).toBe('active')
   })
 
   it('apply() does not harvest markers on a DeepSeek-native session', async () => {

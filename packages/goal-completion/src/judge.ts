@@ -148,6 +148,15 @@ export function pickStartProvider(subagents: NonNullable<Context['subagents']>):
  * Runtime judge. Never fabricates a DeepSeek credential and never calls a
  * DeepSeek adapter just to have a model. Missing `start()` → UNVERIFIABLE.
  */
+function resolveSubagents(ctx: Context): Context['subagents'] {
+  if (ctx.subagents) return ctx.subagents
+  try {
+    return ctx.get?.('subagents') as Context['subagents']
+  } catch {
+    return undefined
+  }
+}
+
 export function createRuntimeJudge(ctx: Context, config: ResolvedConfig, worker?: { options?: { provider?: string }; session?: { header?: { agentPreset?: string } } }): JudgeFn {
   if (config.judge) return config.judge
   if (config.fakeJudge) return fakeJudge()
@@ -156,8 +165,9 @@ export function createRuntimeJudge(ctx: Context, config: ResolvedConfig, worker?
     if (signal.aborted) return { decision: 'UNVERIFIABLE', reason: 'verification was cancelled' }
 
     const parent = candidate.parent ?? (worker as Agent | undefined)
-    const subagents = ctx.subagents
+    const subagents = resolveSubagents(ctx)
     if (!subagents || typeof subagents.start !== 'function') {
+      ctx.logger.warn('lumine-goal-completion: subagents.start is missing; judge is UNVERIFIABLE')
       return { decision: 'UNVERIFIABLE', reason: 'no read-only judge is available' }
     }
     if (!parent) {

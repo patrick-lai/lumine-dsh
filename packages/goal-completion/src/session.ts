@@ -105,18 +105,87 @@ export function hasRoundDriver(ctx: Parameters<typeof collectPluginIds>[0]): boo
   return ids.some(id => isRoundDriverId(id))
 }
 
-export function lastAssistantReply(events: ReadonlyArray<{ type: string; data?: unknown }> | undefined): string | undefined {
-  if (!events) return undefined
+function contentBlocksText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((block) => {
+      if (!block || typeof block !== 'object') return ''
+      const record = block as { type?: string; text?: string }
+      if (typeof record.text !== 'string') return ''
+      if (record.type === 'text' || record.type === undefined) return record.text
+      return ''
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+function assistantMessageText(data: unknown): string {
+  if (!data || typeof data !== 'object') return ''
+  const record = data as { message?: { content?: unknown }; content?: unknown }
+  const fromMessage = contentBlocksText(record.message?.content)
+  if (fromMessage) return fromMessage
+  return contentBlocksText(record.content)
+}
+
+function eventTurn(data: unknown): number | undefined {
+  if (!data || typeof data !== 'object') return undefined
+  const turn = (data as { turn?: unknown }).turn
+  return typeof turn === 'number' ? turn : undefined
+}
+
+function lastTurnNumber(events: ReadonlyArray<{ type: string; data?: unknown }>): number | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
-    if (event?.type !== 'assistant/message') continue
-    const data = event.data as { message?: { content?: Array<{ type?: string; text?: string }> } } | undefined
-    const blocks = data?.message?.content ?? []
-    const text = blocks
-      .filter(block => block.type === 'text' && typeof block.text === 'string')
-      .map(block => block.text as string)
-      .join('\n')
-    if (text) return text
+    const turn = eventTurn(events[index]?.data)
+    if (turn !== undefined) return turn
+  }
+  return undefined
+}
+
+/** Published ACP `assistant/chunk` text-deltas for one turn (`TurnProjector`). */
+function foldTextDeltas(events: ReadonlyArray<{ type: string; data?: unknown }>, turn: number): string {
+  const parts: string[] = []
+  for (const event of events) {
+    if (event.type !== 'assistant/chunk') continue
+    const data = event.data as { turn?: number; chunk?: { type?: string; text?: string } } | undefined
+    if (data?.turn !== turn) continue
+    if (data.chunk?.type === 'text-delta' && typeof data.chunk.text === 'string') {
+      parts.push(data.chunk.text)
+    }
+  }
+  return parts.join('')
+}
+
+/**
+ * Last settled assistant text. Prefer `assistant/message` `{ turn, step, message }`
+ * (published DSH / ACP `TurnProjector.finish`). If that message has no text
+ * blocks, fold the same turn's `assistant/chunk` `{ type: 'text-delta' }` parts
+ * so a chunk-only ACP log still exposes line-start `GOAL REACHED`.
+ */
+export function lastAssistantReply(
+  eventsOrSession: ReadonlyArray<{ type: string; data?: unknown }> | SessionLike | undefined,
+): string | undefined {
+  const events = Array.isArray(eventsOrSession)
+    ? eventsOrSession
+    : eventsOrSession?.events
+  if (!events) return undefined
+  let lastMessage: { type: string; data?: unknown } | undefined
+  for (const event of events) {
+    if (event.type === 'assistant/message') lastMessage = event
+  }
+  if (lastMessage) {
+    const text = assistantMessageText(lastMessage.data)
+    if (text.trim()) return text
+    const turn = eventTurn(lastMessage.data)
+    if (turn !== undefined) {
+      const folded = foldTextDeltas(events, turn)
+      if (folded.trim()) return folded
+    }
+  }
+  const turn = lastTurnNumber(events)
+  if (turn !== undefined) {
+    const folded = foldTextDeltas(events, turn)
+    if (folded.trim()) return folded
   }
   return undefined
 }
