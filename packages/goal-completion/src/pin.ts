@@ -74,16 +74,27 @@ export function verdictLine(verdict: { decision: string; reason: string }): stri
   return `${VERDICT_MARKER} ${verdict.decision} - ${verdict.reason}`
 }
 
+export interface SessionAppend {
+  (
+    type: string,
+    data: unknown,
+    opts?: { surfaceOp?: 'append' | { op: 'replace'; start: number; end: number }; sourceEventSeqs?: number[] },
+  ): unknown
+}
+
 /**
  * Persist a host-visible `GOAL COMPLETION VERDICT:` notice on the live
- * session log. Do not `followup` — that is the harvest auto-continue path.
+ * session log the same way lumine-acp-session / the official loop persist a
+ * surface `user/message`: identified UserMessage data and
+ * `{ surfaceOp: 'append' }`. Published `@deepseek-ai/dsh-session` rejects a
+ * two-arg `user/message` append. Do not `followup` — that auto-continues.
  */
 export function recordVerdictNotice(
-  agent: { session?: { append?: (type: string, data: unknown) => unknown }; inject?: (message: unknown) => void },
+  agent: { session?: { append?: SessionAppend } },
   verdict: { decision: string; reason: string },
 ): string {
   const text = verdictLine(verdict)
   const notice = pluginNotice(text, text)
-  agent.session?.append?.('user/message', notice)
+  agent.session?.append?.('user/message', notice, { surfaceOp: 'append' })
   return text
 }

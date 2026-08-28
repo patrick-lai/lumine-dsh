@@ -152,6 +152,78 @@ export function acpChunkLog(reply: string, source: { kind: string; plugin?: stri
   ]
 }
 
+const SURFACE_TYPES = new Set(['user/message', 'assistant/message', 'tool/result'])
+
+function isJsonSafe(value: unknown): boolean {
+  try {
+    const serialized = JSON.stringify(value)
+    if (serialized === undefined) return false
+    JSON.parse(serialized)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function assertIdentifiedUserMessage(data: unknown): void {
+  if (!data || typeof data !== 'object') throw new Error('session event at seq 0 lacks an identified message')
+  const message = data as Record<string, unknown>
+  if (typeof message.id !== 'string' || message.id === '') {
+    throw new Error('session event lacks an identified message')
+  }
+  if (message.role !== 'user') throw new Error('session event message must have role "user"')
+  if (!Array.isArray(message.content)) throw new Error('session event message has invalid content')
+  const source = message.source as { kind?: unknown } | undefined
+  if (!source || typeof source !== 'object' || typeof source.kind !== 'string' || source.kind === '') {
+    throw new Error('session event message has invalid source')
+  }
+}
+
+/**
+ * Published `@deepseek-ai/dsh-session` `Session.append` contract used by
+ * lumine-acp-session / the official loop. Surface types require
+ * `{ surfaceOp: 'append' }`. A 2-arg `user/message` throw is the live miss.
+ */
+export function publishedAppend(
+  events: Array<{ type: string; seq: number; time: number; data: unknown; surfaceOp?: unknown }>,
+): (
+  type: string,
+  data: unknown,
+  opts?: { surfaceOp?: 'append' | { op: 'replace'; start: number; end: number }; sourceEventSeqs?: number[] },
+) => { type: string; seq: number; time: number; data: unknown; surfaceOp?: unknown } {
+  return (type, data, opts) => {
+    if (!isJsonSafe(data)) {
+      throw new Error(`session event "${type}" carries non-JSON-serializable data`)
+    }
+    if (SURFACE_TYPES.has(type)) {
+      if (opts?.surfaceOp === undefined) {
+        throw new Error(`session event "${type}" is surface-eligible and requires a surfaceOp marker`)
+      }
+      if (opts.surfaceOp !== 'append' && (typeof opts.surfaceOp !== 'object' || opts.surfaceOp.op !== 'replace')) {
+        throw new Error(`session event "${type}" carries an invalid surfaceOp`)
+      }
+    } else if (opts?.surfaceOp !== undefined) {
+      throw new Error(`session event "${type}" is not surface-eligible and cannot carry surfaceOp`)
+    }
+    if (type === 'user/message') assertIdentifiedUserMessage(data)
+    if (data && typeof data === 'object') {
+      const turn = (data as { turn?: unknown }).turn
+      if (turn !== undefined && (typeof turn !== 'number' || !Number.isFinite(turn))) {
+        throw new Error(`session event "${type}" carries non-JSON-serializable data`)
+      }
+    }
+    const event = {
+      type,
+      seq: events.length,
+      time: Date.now(),
+      data,
+      ...opts?.surfaceOp === undefined ? {} : { surfaceOp: opts.surfaceOp },
+    }
+    events.push(event)
+    return event
+  }
+}
+
 export function sessionNoticeTexts(session: { events: ReadonlyArray<{ type: string; data?: unknown }> }): string[] {
   const texts: string[] = []
   for (const event of session.events) {

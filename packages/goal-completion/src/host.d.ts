@@ -152,6 +152,11 @@ declare module '@deepseek-ai/dsh-session' {
     readonly id: SessionId
     readonly header: SessionHeader
     readonly events: readonly SessionEvent[]
+    /**
+     * Published contract: surface types (`user/message`, `assistant/message`,
+     * `tool/result`) require `{ surfaceOp: 'append' }`. Log-only types
+     * (`turn/start`, chunks) must omit it.
+     */
     append(type: string, data: unknown, opts?: { surfaceOp?: 'append'; sourceEventSeqs?: number[] }): SessionEvent
   }
 
