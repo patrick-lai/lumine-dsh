@@ -35,7 +35,6 @@ export const omitUndefined = plugin.omitUndefined
 export const routineRpcHandlers = plugin.routineRpcHandlers
 export const ROUTINE_RPC_METHODS = plugin.ROUTINE_RPC_METHODS
 export const ROUTINE_RPC_NAMESPACE = plugin.ROUTINE_RPC_NAMESPACE
-export const exportRoutineRemote = plugin.exportRoutineRemote
 export { ensureDshPeers }
 
 export type { Config } from './config.ts'

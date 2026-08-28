@@ -22,7 +22,7 @@ Exactly these five. Never `schedule_*`. Never `schedule/change`. `routine_enable
 - `routine_delete`
 - `routine_run_now` — refuses a paused row
 
-Operator arm is host RPC `routine.enable` / the Settings **Routines** section only.
+Operator arm is host RPC `routine/enable` / the Settings **Routines** section only. The host class is a live `TypertRemoteService` on namespace `routine` so the gateway SRC-claims `POST /api/routine/*`.
 
 `rule` (clock) is `once`, `interval` (seconds), five-field `cron`, or `manual`. Quiet hours are IANA; wrapping night arcs are allowed. Catch-up is one fire plus a missed-count note, never a backfill storm.
 

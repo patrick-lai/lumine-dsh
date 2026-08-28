@@ -1,12 +1,12 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { Service } from '@deepseek-ai/cordis'
+import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { ResolvedConfig } from './config.ts'
 import { filePersist, openPersist, type RoutinePersist } from './persist.ts'
+import { installRoutineRemoteMarkers } from './remote.ts'
+import { routineRpcHandlers } from './rpc-payload.ts'
 import { RoutineRuntime } from './runtime.ts'
 import { RoutineStore } from './store.ts'
 import { registerRoutineTools } from './tools.ts'
-import { exportRoutineRemote } from './remote.ts'
-import { routineRpcHandlers } from './rpc-payload.ts'
 import type { CreateRoutineInput, Routine, UpdateRoutineInput } from './types.ts'
 import { RoutineError } from './types.ts'
 
@@ -25,16 +25,17 @@ export interface RoutineServiceOptions extends ResolvedConfig {
 
 /**
  * Host-plane routine store and timer. Model tools are routine_list / create /
- * update / delete / run_now. `routine.enable` is host RPC / settings only.
+ * update / delete / run_now. `enable` is host RPC / settings only.
+ *
+ * Live Cordis service key and Typert namespace are both `routine`, so the
+ * gateway SRC-discovers `routine/list` and friends.
  */
-export class RoutineService extends Service {
+export class RoutineService extends TypertRemoteService {
   static inject = ['agents']
 
   store: RoutineStore
   runtime: RoutineRuntime
   readonly resolved: ResolvedConfig
-  /** Visible Typert binding. Namespace is `routine` (endpoints `routine/list`). */
-  typertRemote?: { readonly service: object; readonly serviceKey: string; readonly namespace: string }
   private readonly now: () => number
   private readonly pending = new Set<Promise<void>>()
   private started = false
@@ -42,7 +43,7 @@ export class RoutineService extends Service {
   private readonly persistOverride?: RoutinePersist
 
   constructor(ctx: Context, options: RoutineServiceOptions) {
-    super(ctx, 'routines')
+    super(ctx, 'routine')
     this.resolved = {
       defaultPreset: options.defaultPreset,
       ...options.defaultWorkspaceCwd ? { defaultWorkspaceCwd: options.defaultWorkspaceCwd } : {},
@@ -59,55 +60,55 @@ export class RoutineService extends Service {
     }, 'lumineRoutines.start()')
     this.installTimer()
     this.installTools()
-    this.tryExportRemote()
   }
 
-  /**
-   * Typert / Settings adapters. Wire names stay `routine/list` etc.
-   * Payloads omit nil `nextRunAt` / `activeRun` / `sessionId`.
-   */
-  async remoteExportList(): Promise<{ routines: Routine[] }> {
-    return this.rpcHandlers().list()
+  async list(): Promise<{ routines: Routine[] }> {
+    return (await this.rpc()).list()
   }
 
-  async remoteExportCreate(input: CreateRoutineInput): Promise<{
+  async create(input: CreateRoutineInput): Promise<{
     routine: Routine
     enabled: false
     saved_paused: true
     operator_must_enable: true
   }> {
-    return this.rpcHandlers().create(input)
+    return (await this.rpc()).create(input)
   }
 
-  async remoteExportUpdate(id: string, input: UpdateRoutineInput): Promise<{
+  async update(id: string, input: UpdateRoutineInput): Promise<{
     routine: Routine
     enabled: false
     saved_paused: true
     operator_must_enable: true
   }> {
-    return this.rpcHandlers().update(id, input)
+    return (await this.rpc()).update(id, input)
   }
 
-  async remoteExportDelete(id: string): Promise<{ deleted: Routine }> {
-    return this.rpcHandlers().delete(id)
+  async delete(id: string): Promise<{ deleted: Routine }> {
+    return (await this.rpc()).delete(id)
   }
 
-  async remoteExportEnable(id: string, enabled: boolean): Promise<{ routine: Routine }> {
-    return this.rpcHandlers().enable(id, enabled)
+  /** Host RPC / settings only. Not a model tool. */
+  async enable(id: string, enabled: boolean): Promise<{ routine: Routine }> {
+    return (await this.rpc()).enable(id, enabled)
   }
 
-  async remoteExportRunNow(id: string): Promise<{ routine?: Routine; sessionId?: string }> {
-    return this.rpcHandlers().runNow(id)
+  async runNow(id: string): Promise<{ routine?: Routine; sessionId?: string }> {
+    return (await this.rpc()).runNow(id)
   }
 
-  private rpcHandlers() {
+  private async rpc() {
+    await this.ensureLoaded()
     return routineRpcHandlers({
-      list: () => this.list(),
-      create: input => this.create(input),
-      update: (id, input) => this.update(id, input),
-      delete: id => this.delete(id),
-      enable: (id, enabled) => this.enable(id, enabled),
-      runNow: id => this.runNow(id),
+      list: () => this.runtime.list(),
+      create: input => this.runtime.create(input),
+      update: (id, input) => this.runtime.update(id, input),
+      delete: id => this.runtime.delete(id),
+      enable: (id, enabled) => this.runtime.enable(id, enabled),
+      runNow: async id => {
+        const launched = await this.runtime.runNow(id)
+        return { ...launched, routine: this.store.require(id) }
+      },
       require: id => this.store.require(id),
     })
   }
@@ -125,6 +126,10 @@ export class RoutineService extends Service {
     return this.started && !INACTIVE.has(this.ctx.fiber.state)
   }
 
+  private async ensureLoaded(): Promise<void> {
+    if (!this.store.loadedOnce) await this.store.load(this.now())
+  }
+
   async start(): Promise<void> {
     if (!this.persistOverride) {
       const persist = await openPersist(this.ctx)
@@ -133,7 +138,7 @@ export class RoutineService extends Service {
         this.runtime.store = this.store
       }
     }
-    if (!this.store.loadedOnce) await this.store.load(this.now())
+    await this.ensureLoaded()
     this.started = true
     await this.tick()
   }
@@ -143,41 +148,9 @@ export class RoutineService extends Service {
     await Promise.allSettled([...this.pending])
   }
 
-  async create(input: CreateRoutineInput): Promise<Routine> {
-    if (!this.store.loadedOnce) await this.store.load(this.now())
-    return this.runtime.create(input)
-  }
-
-  async list(): Promise<Routine[]> {
-    if (!this.store.loadedOnce) await this.store.load(this.now())
-    return this.runtime.list()
-  }
-
-  async update(id: string, input: UpdateRoutineInput): Promise<Routine> {
-    if (!this.store.loadedOnce) await this.store.load(this.now())
-    return this.runtime.update(id, input)
-  }
-
-  async delete(id: string): Promise<Routine> {
-    if (!this.store.loadedOnce) await this.store.load(this.now())
-    return this.runtime.delete(id)
-  }
-
-  /** Host RPC / settings only. Not a model tool. */
-  async enable(id: string, enabled: boolean): Promise<Routine> {
-    if (!this.store.loadedOnce) await this.store.load(this.now())
-    return this.runtime.enable(id, enabled)
-  }
-
-  async runNow(id: string): Promise<{ sessionId?: string; routine: Routine }> {
-    if (!this.store.loadedOnce) await this.store.load(this.now())
-    const launched = await this.runtime.runNow(id)
-    return { ...launched, routine: this.store.require(id) }
-  }
-
   async tick(): Promise<void> {
     if (!this.isActive()) return
-    if (!this.store.loadedOnce) await this.store.load(this.now())
+    await this.ensureLoaded()
     await this.track(this.runtime.runDue(this.now()))
   }
 
@@ -232,21 +205,9 @@ export class RoutineService extends Service {
       )
     }
   }
-
-  /**
-   * Official DSH RPC is Typert `routine/<method>` plus duck-typed
-   * `rpc.register('routine.list')`. `routine.enable` is host-only.
-   */
-  private tryExportRemote(): void {
-    try {
-      exportRoutineRemote(this.ctx, this, RoutineService)
-    } catch (error) {
-      this.ctx.logger.warn(
-        `lumine-routines: remote export failed: ${error instanceof Error ? error.message : String(error)}`,
-      )
-    }
-  }
 }
+
+installRoutineRemoteMarkers(RoutineService)
 
 export async function createRoutineService(ctx: Context, options: ResolvedConfig): Promise<RoutineService> {
   const persist = await openPersist(ctx)

@@ -10,6 +10,7 @@ declare module '@deepseek-ai/cordis' {
     agents: import('@deepseek-ai/dsh-agent').AgentRegistry
     sessions?: import('@deepseek-ai/dsh-session').SessionStore
     tools?: { register(tool: unknown): unknown }
+    routine?: unknown
     routines?: unknown
     interval(callback: () => unknown, delay: number): () => void
     get<T = unknown>(name: string): T | undefined
@@ -157,13 +158,51 @@ declare module '@deepseek-ai/dsh-tools' {
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   import type { Context } from '@deepseek-ai/cordis'
+  import type { Service } from '@deepseek-ai/cordis'
 
-  export class TypertRemoteService {
-    ctx: Context
-    constructor(ctx: Context, name: string)
+  export interface TypertGatewayBinding {
+    readonly service: Service
+    readonly serviceKey: string
+    readonly namespace: string
   }
 
-  export function Remote(name?: string): MethodDecorator
+  export interface RemoteMethodMarker {
+    readonly method: string
+    readonly exportName?: string
+    readonly invocation: { readonly kind: 'direct' } | { readonly kind: 'context'; readonly context: string }
+  }
+
+  export abstract class TypertRemoteService extends Service {
+    readonly typertRemote: TypertGatewayBinding
+    constructor(ctx: Context, serviceKey: string, options?: { namespace?: string })
+  }
+
+  export function bindTypertRemote(
+    service: Service,
+    serviceKey: string,
+    options?: { namespace?: string },
+  ): TypertGatewayBinding
+
+  /** TC39 method decorator. `Remote()` records markers via `context.addInitializer`. */
+  export function Remote(method: (...args: never[]) => unknown, context: {
+    readonly kind?: string
+    readonly private: boolean
+    readonly static: boolean
+    readonly name: string | symbol
+    addInitializer(initializer: (this: unknown) => void): void
+  }): void
+  export function Remote(option: string | { mode: 'stream' }): (
+    method: (...args: never[]) => unknown,
+    context: {
+      readonly kind?: string
+      readonly private: boolean
+      readonly static: boolean
+      readonly name: string | symbol
+      addInitializer(initializer: (this: unknown) => void): void
+    },
+  ) => void
+
+  export function remoteMethods(service: object): readonly RemoteMethodMarker[]
 }
 
 declare module '@deepseek-ai/dsh-storage-domain' {

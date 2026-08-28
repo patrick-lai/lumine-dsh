@@ -22,6 +22,9 @@ export const DSH_PEERS = [
   '@deepseek-ai/dsh-typert-protocol',
 ] as const
 
+/** Overlay `name` the official launch healer should already hoist from lumine-dsh. */
+export const PROFILE_PACKAGE_NAME = '@lumine/dsh-routines'
+
 export function packageRootFrom(fromUrl: string): string {
   const file = fileURLToPath(fromUrl)
   let dir = dirname(file)
@@ -43,16 +46,17 @@ function tryResolve(name: string, fromUrl: string): string | undefined {
   }
 }
 
+export function dshHome(env: NodeJS.ProcessEnv = process.env): string {
+  const homeRaw = env.DSH_HOME?.trim()
+  if (!homeRaw) return join(homedir(), '.dsh')
+  if (homeRaw === '~') return homedir()
+  if (homeRaw.startsWith('~/') || homeRaw.startsWith('~\\')) return join(homedir(), homeRaw.slice(2))
+  return homeRaw
+}
+
 export function dshModuleRoots(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): string[] {
   const roots: string[] = []
-  const homeRaw = env.DSH_HOME?.trim()
-  const home = !homeRaw
-    ? join(homedir(), '.dsh')
-    : homeRaw === '~'
-      ? homedir()
-      : homeRaw.startsWith('~/') || homeRaw.startsWith('~\\')
-        ? join(homedir(), homeRaw.slice(2))
-        : homeRaw
+  const home = dshHome(env)
   const profile = env.DSH_PROFILE?.trim()
   if (profile) roots.push(join(home, 'profiles', profile, 'node_modules'))
   for (const name of ['web', 'headless', 'sdk', 'acp']) {
@@ -105,6 +109,42 @@ function linkPeer(source: string, dest: string): boolean {
  * Symlink missing DSH peers into this package's `node_modules` so the
  * subsequent dynamic `import('./plugin.js')` can resolve them.
  */
+/**
+ * Heal a top-level profile symlink so overlay `name: '@lumine/dsh-routines'`
+ * resolves without a hand link. Official launch already hoists `@lumine/*`
+ * carried by the root bundle; this only writes the missing row.
+ */
+export function profileModuleRoots(env: NodeJS.ProcessEnv = process.env): string[] {
+  const home = dshHome(env)
+  const roots: string[] = []
+  const profile = env.DSH_PROFILE?.trim()
+  if (profile) roots.push(join(home, 'profiles', profile, 'node_modules'))
+  roots.push(join(home, 'profiles', 'web', 'node_modules'))
+  roots.push(join(home, 'profiles', 'node_modules'))
+  return roots
+}
+
+export function ensureProfilePackageLink(
+  fromUrl: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const packageRoot = packageRootFrom(fromUrl)
+  const linked: string[] = []
+  const seen = new Set<string>()
+  for (const root of profileModuleRoots(env)) {
+    if (seen.has(root)) continue
+    seen.add(root)
+    const dest = join(root, ...PROFILE_PACKAGE_NAME.split('/'))
+    if (linkPeer(packageRoot, dest)) linked.push(root)
+  }
+  return linked
+}
+
+/**
+ * Symlink missing DSH peers into this package's `node_modules` so the
+ * subsequent dynamic `import('./plugin.js')` can resolve them. Also heal
+ * the profile `@lumine/dsh-routines` row when official hoist skipped it.
+ */
 export function ensureDshPeers(
   fromUrl: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -122,5 +162,6 @@ export function ensureDshPeers(
     if (source === undefined) continue
     if (linkPeer(source, join(destRoot, ...name.split('/')))) linked.push(name)
   }
+  ensureProfilePackageLink(fromUrl, env, cwd)
   return linked
 }

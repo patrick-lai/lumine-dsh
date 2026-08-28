@@ -49,8 +49,11 @@ describe('routines bundle cordis overlay', () => {
     expect(tools).toMatch(/output:\s*\{[\s\S]*schema/)
     expect(tools).toMatch(/saved_paused/)
     expect(tools).toMatch(/operator_must_enable/)
-    expect(service).toMatch(/remoteExportEnable/)
-    expect(service).toMatch(/exportRoutineRemote/)
+    expect(service).toMatch(/TypertRemoteService/)
+    expect(service).toMatch(/super\(ctx, 'routine'\)/)
+    expect(service).toMatch(/installRoutineRemoteMarkers/)
+    expect(service).not.toMatch(/rpc\.register/)
+    expect(service).not.toMatch(/remotes\.register/)
   })
 
   it('loads the Routines tab from the same package client half, not a profile overlay', () => {

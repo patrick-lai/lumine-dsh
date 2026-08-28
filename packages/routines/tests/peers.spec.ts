@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -41,5 +41,6 @@ describe('DSH peer resolution for link: installs', () => {
     expect(findPeerDirectory('@deepseek-ai/cordis', [join(packageDir, 'node_modules')])).toBe(
       join(packageDir, 'node_modules', '@deepseek-ai', 'cordis'),
     )
+    expect(readlinkSync(join(profileModules, '@lumine', 'dsh-routines'))).toBe(packageDir)
   })
 })

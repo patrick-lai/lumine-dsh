@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "lib": ["ES2022", "ESNext.Disposable", "DOM"],
     "jsx": "react-jsx",
+    "experimentalDecorators": false,
     "strict": true,
     "skipLibCheck": true,
     "declaration": true,

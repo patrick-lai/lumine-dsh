@@ -43,7 +43,6 @@ export { ensureDshPeers, DSH_PEERS } from './peers.ts'
 export { RoutineError } from './types.ts'
 export { omitUndefined } from './json.ts'
 export { routineRpcHandlers, ROUTINE_RPC_METHODS, ROUTINE_RPC_NAMESPACE } from './rpc-payload.ts'
-export { exportRoutineRemote } from './remote.ts'
 export type { CreateRoutineInput, Routine, RoutineRule, UpdateRoutineInput } from './types.ts'
 
 export function apply(ctx: Context, config: Config = {}): void {

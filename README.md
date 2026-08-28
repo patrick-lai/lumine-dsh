@@ -117,7 +117,7 @@ Model tools (never `schedule_*`, never `schedule/change`):
 - `routine_delete`
 - `routine_run_now` — refuses a paused row
 
-`routine.enable` is host RPC / the Settings **Routines** section only. The model cannot arm unattended work. The tab lists persisted rows, lets the operator enable or pause them, run now (refuses while paused), and delete. Compact create lands paused. The client half lives on the same `@lumine/dsh-routines` package (`dsh.client`), so the section appears without editing the profile `cordis.patch.yml`.
+`routine/enable` is host RPC / the Settings **Routines** section only (`TypertRemoteService` namespace `routine`). The model cannot arm unattended work. The tab lists persisted rows, lets the operator enable or pause them, run now (refuses while paused), and delete. Compact create lands paused. The client half lives on the same `@lumine/dsh-routines` package (`dsh.client`), so the section appears without editing the profile `cordis.patch.yml`.
 
 Clock: `once` | `interval(seconds)` | five-field cron | `manual`. Quiet hours are IANA (wrapping night arcs ok). Catch-up is one fire plus a missed-count note. Failed delivery retries up to 3 ticks, then advances.
 

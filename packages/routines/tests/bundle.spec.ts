@@ -11,24 +11,25 @@ describe('built loader entry', () => {
     )
   })
 
-  it('does not value-import FiberState from @deepseek-ai/cordis', () => {
+  it('exports a live TypertRemoteService the gateway can SRC-claim', () => {
     const built = readFileSync(new URL('../lib/plugin.js', import.meta.url), 'utf8')
-    expect(built).toMatch(/from ["']@deepseek-ai\/cordis["']/)
+    expect(built).toMatch(/TypertRemoteService/)
+    expect(built).toMatch(/@deepseek-ai\/dsh-typert-protocol/)
+    expect(built).toMatch(/super\([^,]+,\s*["']routine["']\)/)
+    expect(built).toMatch(/installRoutineRemoteMarkers/)
+    expect(built).toMatch(/\bRemote\b/)
+    expect(built).toMatch(/addInitializer/)
+    expect(built).not.toMatch(/rpc\.register/)
+    expect(built).not.toMatch(/remotes\.register/)
     expect(built).not.toMatch(
       /import\s*\{[^}]*\bFiberState\b[^}]*\}\s*from\s*["']@deepseek-ai\/cordis["']/,
     )
-    const cordisImport = built.match(/import\s*\{([^}]*)\}\s*from\s*["']@deepseek-ai\/cordis["']/)
-    expect(cordisImport?.[1]).toBeDefined()
-    expect(cordisImport?.[1]).not.toMatch(/\bFiberState\b/)
-    expect(cordisImport?.[1]).toMatch(/\bService\b/)
     expect(built).toMatch(/new Set\(\[\s*3,\s*4,\s*5\s*\]\)/)
     expect(built).not.toMatch(/\bsetInterval\s*\(/)
     expect(built).not.toMatch(/['"]schedule\/change['"]/)
     expect(built).not.toMatch(/['"]schedule_create['"]/)
     expect(built).toMatch(/routine_list/)
     expect(built).toMatch(/routine_run_now/)
-    expect(built).toMatch(/remoteExportEnable/)
-    expect(built).toMatch(/routine\.enable/)
   })
 
   it('ships a lazy-CJS client factory for the Routines settings section', () => {

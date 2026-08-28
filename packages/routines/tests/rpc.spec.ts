@@ -1,9 +1,8 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { filePersist } from '../src/persist.ts'
-import { exportRoutineRemote } from '../src/remote.ts'
 import { routineRpcHandlers } from '../src/rpc-payload.ts'
 import { RoutineRuntime } from '../src/runtime.ts'
 import { RoutineStore } from '../src/store.ts'
@@ -70,35 +69,47 @@ describe('routine RPC payloads stay lossless JSON', () => {
     expect(deleted.deleted.id).toBe(created.routine.id)
     expect(snapshotJsonValue(deleted)).toEqual(deleted)
   })
+})
 
-  it('registers duck-typed routine.* handlers that return the same payloads', async () => {
-    const { store, runtime } = createHost()
-    await store.load()
-    const registered = new Map<string, (...args: unknown[]) => unknown>()
-    const service = {
-      list: () => runtime.list(),
-      create: (input: Parameters<typeof runtime.create>[0]) => runtime.create(input),
-      update: (id: string, input: Parameters<typeof runtime.update>[1]) => runtime.update(id, input),
-      delete: (id: string) => runtime.delete(id),
-      enable: (id: string, enabled: boolean) => runtime.enable(id, enabled),
-      runNow: async (id: string) => ({ ...(await runtime.runNow(id)), routine: store.require(id) }),
-      require: (id: string) => store.require(id),
-    }
-    const names = exportRoutineRemote({
-      get(name) {
-        if (name === 'rpc') return { register: (key: string, handler: (...args: unknown[]) => unknown) => { registered.set(key, handler) } }
-        return undefined
+describe('TC39 Remote() markers for gateway SRC', () => {
+  it('calls published Remote() with addInitializer, not as a legacy decorator', async () => {
+    const marked: string[] = []
+    vi.resetModules()
+    vi.doMock('@deepseek-ai/dsh-typert-protocol', () => ({
+      Remote(
+        method: unknown,
+        context?: {
+          private?: boolean
+          static?: boolean
+          name?: string | symbol
+          addInitializer?: (initializer: (this: object) => void) => void
+        },
+      ) {
+        if (typeof method === 'string' || (typeof method === 'object' && method !== null)) {
+          throw new TypeError('typert-protocol: Remote decorator context is missing')
+        }
+        if (context === undefined || typeof context.addInitializer !== 'function') {
+          throw new TypeError('typert-protocol: Remote decorator context is missing')
+        }
+        if (context.private || context.static || typeof context.name !== 'string') {
+          throw new TypeError('typert-protocol: Remote decorators require a public instance method with a string name')
+        }
+        const name = context.name
+        context.addInitializer(function (this: object) {
+          marked.push(name)
+        })
       },
-    }, service, { prototype: {} })
-    expect(names).toEqual(expect.arrayContaining([
-      'routine.list', 'routine.create', 'routine.enable', 'routine.runNow', 'routine.delete',
-    ]))
-    const created = await registered.get('routine.create')!({
-      title: 'paused',
-      promptTemplate: 'hi',
-      rule: { kind: 'manual' },
-    })
-    expect(snapshotJsonValue(created)).toEqual(created)
-    expect((created as { enabled: boolean }).enabled).toBe(false)
+    }))
+    class Probe {
+      list() { return { routines: [] } }
+      create() { return { routine: {} } }
+      update() { return { routine: {} } }
+      delete() { return { deleted: {} } }
+      enable() { return { routine: {} } }
+      runNow() { return {} }
+    }
+    const { installRoutineRemoteMarkers } = await import('../src/remote.ts')
+    installRoutineRemoteMarkers(Probe)
+    expect(marked.sort()).toEqual(['create', 'delete', 'enable', 'list', 'runNow', 'update'])
   })
 })
