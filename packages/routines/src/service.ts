@@ -156,15 +156,27 @@ export class RoutineService extends Service {
   }
 
   private installTools(): void {
-    const register = (host: { tools?: { register?: (tool: unknown) => unknown } }): void => {
+    const register = (host: { tools?: { register?: (tool: unknown) => unknown }; logger?: { warn(...args: unknown[]): void } }): void => {
       if (this.toolsRegistered) return
-      const names = registerRoutineTools(host, this.runtime)
-      if (names.length > 0) this.toolsRegistered = true
+      try {
+        const names = registerRoutineTools(host, this.runtime)
+        if (names.length > 0) this.toolsRegistered = true
+      } catch (error) {
+        this.ctx.logger.warn(
+          `lumine-routines: tools.register failed: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
     }
-    register(this.ctx)
-    this.ctx.inject(['tools'], toolsCtx => {
-      register(toolsCtx)
-    })
+    try {
+      register(this.ctx)
+      this.ctx.inject(['tools'], toolsCtx => {
+        register(toolsCtx)
+      })
+    } catch (error) {
+      this.ctx.logger.warn(
+        `lumine-routines: tools inject failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
   }
 
   /**

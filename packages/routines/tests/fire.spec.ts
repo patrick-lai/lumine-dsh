@@ -6,7 +6,7 @@ import { userMessageText } from '../src/deliver.ts'
 import { filePersist } from '../src/persist.ts'
 import { RoutineRuntime } from '../src/runtime.ts'
 import { RoutineStore } from '../src/store.ts'
-import { createRoutineToolHandlers, registerRoutineTools, ROUTINE_TOOL_NAMES } from '../src/tools.ts'
+import { createRoutineToolDefinitions, registerRoutineTools, ROUTINE_TOOL_NAMES } from '../src/tools.ts'
 import { RoutineError } from '../src/types.ts'
 
 interface SessionRecord {
@@ -84,19 +84,21 @@ describe('operator gate and fire', () => {
     await expect(runtime.runNow(created.id)).rejects.toMatchObject({ code: 'ROUTINE_PAUSED' })
     expect(harness.createdAgents).toHaveLength(0)
 
-    const registered: string[] = []
+    const registered: Array<{ name: string; output?: { schema?: unknown; render?: unknown } }> = []
     const names = registerRoutineTools({
-      tools: { register(tool: { name: string }) { registered.push(tool.name) } },
+      tools: { register(tool: { name: string; output?: { schema?: unknown; render?: unknown } }) { registered.push(tool) } },
     }, runtime)
     expect(names).toEqual([...ROUTINE_TOOL_NAMES])
-    expect(registered).toEqual([...ROUTINE_TOOL_NAMES])
-    expect(registered.some(name => name.startsWith('schedule_'))).toBe(false)
-    expect(registered).not.toContain('routine_enable')
+    expect(registered.map(tool => tool.name)).toEqual([...ROUTINE_TOOL_NAMES])
+    expect(registered.some(tool => tool.name.startsWith('schedule_'))).toBe(false)
+    expect(registered.map(tool => tool.name)).not.toContain('routine_enable')
+    for (const tool of registered) {
+      expect(tool.output?.schema).toBeTruthy()
+      expect(typeof tool.output?.render).toBe('function')
+    }
 
-    const runNow = createRoutineToolHandlers(runtime).find(tool => tool.name === 'routine_run_now')
-    const refused = await runNow!.execute({ id: created.id })
-    expect(refused.isError).toBe(true)
-    expect(refused.content[0]?.text).toMatch(/ROUTINE_PAUSED/)
+    const runNow = createRoutineToolDefinitions(runtime).find(tool => tool.name === 'routine_run_now')
+    await expect(runNow!.execute({ id: created.id })).rejects.toMatchObject({ code: 'ROUTINE_PAUSED' })
   })
 
   it('after operator-enable + short interval, a second session has the prompt as its first user message', async () => {
@@ -146,17 +148,19 @@ describe('operator gate and fire', () => {
     const store = new RoutineStore(filePersist(join(mkdtempSync(join(tmpdir(), 'lumine-routines-')), 'routines.json')))
     await store.load()
     const runtime = new RoutineRuntime(store, { agents: harness.agents }, () => Date.parse('2026-01-01T00:00:00Z'))
-    const create = createRoutineToolHandlers(runtime).find(tool => tool.name === 'routine_create')
-    const result = await create!.execute({
+    const create = createRoutineToolDefinitions(runtime).find(tool => tool.name === 'routine_create')
+    const payload = await create!.execute({
       title: 'no arm',
       promptTemplate: 'ping',
       rule: { kind: 'manual' },
       enabled: true,
-    })
-    expect(result.isError).toBeFalsy()
-    const payload = JSON.parse(result.content[0]!.text) as { enabled: boolean; routine: { enabled: boolean } }
+    }) as { enabled: boolean; saved_paused: boolean; operator_must_enable: boolean; routine: { enabled: boolean } }
     expect(payload.enabled).toBe(false)
+    expect(payload.saved_paused).toBe(true)
+    expect(payload.operator_must_enable).toBe(true)
     expect(payload.routine.enabled).toBe(false)
+    expect(payload).not.toHaveProperty('content')
+    expect(payload).not.toHaveProperty('isError')
     expect(harness.createdAgents).toHaveLength(0)
   })
 

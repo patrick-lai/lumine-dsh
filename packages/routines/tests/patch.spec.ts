@@ -46,6 +46,9 @@ describe('routines bundle cordis overlay', () => {
     expect(tools).toMatch(/'routine_run_now'/)
     expect(tools).not.toMatch(/name:\s*'schedule_/)
     expect(tools).not.toMatch(/name:\s*'routine_enable'/)
+    expect(tools).toMatch(/output:\s*\{[\s\S]*schema/)
+    expect(tools).toMatch(/saved_paused/)
+    expect(tools).toMatch(/operator_must_enable/)
   })
 
   it('does not tell people to re-insert directory-picker-browse in a profile overlay', () => {

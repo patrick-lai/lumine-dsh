@@ -33,7 +33,12 @@ export {
   shouldFire,
   windowContains,
 } from './calendar.ts'
-export { ROUTINE_TOOL_NAMES, registerRoutineTools } from './tools.ts'
+export {
+  ROUTINE_TOOL_NAMES,
+  createRoutineToolDefinitions,
+  defineRoutineTool,
+  registerRoutineTools,
+} from './tools.ts'
 export { ensureDshPeers, DSH_PEERS } from './peers.ts'
 export { RoutineError } from './types.ts'
 export type { CreateRoutineInput, Routine, RoutineRule, UpdateRoutineInput } from './types.ts'

@@ -128,12 +128,31 @@ declare module '@deepseek-ai/dsh-agent' {
 }
 
 declare module '@deepseek-ai/dsh-tools' {
-  export function defineTool(definition: {
+  export interface ToolOutputDefinition {
+    readonly schema: unknown
+    render(args: unknown, value: unknown): Array<{ type: string; text?: string }>
+    presentationMeta?(args: unknown, value: unknown): unknown
+  }
+
+  export interface ToolDefinition {
+    readonly name: string
+    readonly description: string
+    readonly parameters: unknown
+    readonly output: ToolOutputDefinition
+    execute(args: unknown, exec?: unknown): Promise<unknown>
+  }
+
+  export function defineTool(options: {
     name: string
     description: string
-    inputSchema?: unknown
-    execute: (args: Record<string, unknown>) => unknown
-  }): unknown
+    parameters: Record<string, unknown>
+    output: {
+      schema: unknown
+      render(args: unknown, value: unknown): Array<{ type: string; text?: string }>
+      presentationMeta?(args: unknown, value: unknown): unknown
+    }
+    execute(args: unknown, exec?: unknown): Promise<unknown> | unknown
+  }): ToolDefinition
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
