@@ -36,7 +36,9 @@ export const seedSessionRoute = plugin.seedSessionRoute
 export const selectionFromCatalog = plugin.selectionFromCatalog
 export const DSH_PEERS = plugin.DSH_PEERS
 export const describeError = plugin.describeError
+export const driverErrorRecord = plugin.driverErrorRecord
 export const formatDriverFailure = plugin.formatDriverFailure
+export const isJsonSafe = plugin.isJsonSafe
 export const nextTurnOf = plugin.nextTurnOf
 export const openTurnThenClaim = plugin.openTurnThenClaim
 export { ensureDshPeers }

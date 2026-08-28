@@ -31,7 +31,14 @@ export {
 } from './providers.ts'
 export type { ProviderId, ResolvedLaunch } from './providers.ts'
 export { TurnProjector, lastBoundAcpSession, userMessageText } from './events.ts'
-export { describeError, formatDriverFailure, nextTurnOf, openTurnThenClaim } from './turn.ts'
+export {
+  describeError,
+  driverErrorRecord,
+  formatDriverFailure,
+  isJsonSafe,
+  nextTurnOf,
+  openTurnThenClaim,
+} from './turn.ts'
 export {
   AcpCatalogAdapter,
   AcpCatalogRegistry,

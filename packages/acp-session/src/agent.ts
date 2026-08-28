@@ -31,7 +31,14 @@ import {
   type ProjectedCatalog,
 } from './models.ts'
 import { MissingCliError, resolveLaunch, type ProviderId } from './providers.ts'
-import { describeError, formatDriverFailure, nextTurnOf, openTurnThenClaim } from './turn.ts'
+import {
+  describeError,
+  driverErrorRecord,
+  formatDriverFailure,
+  isJsonSafe,
+  nextTurnOf,
+  openTurnThenClaim,
+} from './turn.ts'
 
 type Phase =
   | { kind: 'idle'; lastTurn: number }
@@ -39,6 +46,9 @@ type Phase =
   | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: boolean }
 
 function appendOp(session: Session, op: LogOp): number {
+  if (!isJsonSafe(op.data)) {
+    throw new Error(`session event "${op.type}" carries non-JSON-serializable data`)
+  }
   const event = op.surface
     ? session.append(op.type, op.data, { surfaceOp: 'append', ...op.sourceEventSeqs ? { sourceEventSeqs: op.sourceEventSeqs } : {} })
     : session.append(op.type, op.data)
@@ -282,14 +292,22 @@ export class AcpSessionAgent implements Agent {
     const text = formatDriverFailure(where, error)
     this.loopCtx.logger.error(text)
     const { message, stack } = describeError(error)
-    const turn = this.phase.kind === 'running' ? this.phase.turn : this.phase.lastTurn
-    const step = this.phase.kind === 'running' ? this.phase.step : 0
+    const rawTurn = this.phase.kind === 'running' ? this.phase.turn : this.phase.lastTurn
+    const rawStep = this.phase.kind === 'running' ? this.phase.step : 0
+    const turn = Number.isSafeInteger(rawTurn) ? rawTurn : 0
+    const step = Number.isSafeInteger(rawStep) ? rawStep : 0
     emitAgentEvent(this.loopCtx, this, 'agent/error', {
       turn,
       step,
       error: message,
       ...stack === undefined ? {} : { stack },
     })
+    const record = driverErrorRecord(where, error)
+    try {
+      this.session.append('feedback/record', record)
+    } catch (appendError: unknown) {
+      this.loopCtx.logger.error(formatDriverFailure('error-event', appendError))
+    }
   }
 
   private wakeDriver(wakeAfterAbort = false): void {

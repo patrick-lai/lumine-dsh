@@ -32,6 +32,24 @@ export function formatDriverFailure(where: string, error: unknown): string {
     : `lumine-acp-session: ${where}: ${message}`
 }
 
+/** Same lossless JSON boundary Session.append uses (NaN / Infinity are not JSON). */
+export function isJsonSafe(value: unknown): boolean {
+  if (value === null) return true
+  const kind = typeof value
+  if (kind === 'boolean' || kind === 'string') return true
+  if (kind === 'number') return Number.isFinite(value)
+  if (Array.isArray(value)) return value.every(item => isJsonSafe(item))
+  if (kind === 'object' && value && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.values(value).every(item => isJsonSafe(item))
+  }
+  return false
+}
+
+/** Known, unconstrained session row (`feedback/record` is `{ text: string }`). */
+export function driverErrorRecord(where: string, error: unknown): { text: string } {
+  return { text: `lumine-acp-session: ${where}: ${describeError(error).message}` }
+}
+
 /** Host order: persist turn/start, then claim that turn's inbox batch. */
 export function openTurnThenClaim<T>(
   appendTurnStart: (turn: number) => void,

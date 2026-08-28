@@ -54,6 +54,18 @@ describe('host-loop turn order (claim after turn/start)', () => {
       /lumine-acp-session: kick: turn\/start expected turn 1, got NaN\nError:/,
     )
   })
+
+  it('treats NaN turn payloads as non-JSON, and writes a JSON-safe feedback/record', async () => {
+    const { driverErrorRecord, isJsonSafe } = await import('../src/turn.ts')
+    expect(isJsonSafe({ turn: 1 })).toBe(true)
+    expect(isJsonSafe({ turn: Number.NaN })).toBe(false)
+    expect(isJsonSafe({ turn: Number.POSITIVE_INFINITY })).toBe(false)
+    const record = driverErrorRecord('kick', new Error('session event "turn/start" carries non-JSON-serializable data'))
+    expect(isJsonSafe(record)).toBe(true)
+    expect(record).toEqual({
+      text: 'lumine-acp-session: kick: session event "turn/start" carries non-JSON-serializable data',
+    })
+  })
 })
 
 describe('AcpSessionAgent driver contract', () => {
@@ -66,6 +78,7 @@ describe('AcpSessionAgent driver contract', () => {
     expect(source).toMatch(/inserted: \(\) => \{ this\.wakeDriver\(\)/)
     expect(source).toMatch(/reportDriverFailure\('kick'/)
     expect(source).toMatch(/logger\.error/)
+    expect(source).toMatch(/feedback\/record/)
     expect(source).not.toMatch(/catch \{\s*\/\/ Failures are written/)
   })
 })
