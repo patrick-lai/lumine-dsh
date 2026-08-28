@@ -3,6 +3,9 @@ import type { PermissionMode } from './config.ts'
 import type { AcpUpdate } from './events.ts'
 import {
   collectConfigOptions,
+  configIdForModel,
+  configIdForReasoning,
+  hasCatalogHints,
   projectAcpModels,
   type ProjectedCatalog,
 } from './models.ts'
@@ -29,6 +32,8 @@ export interface AcpChildOptions {
 export interface InitializeResult {
   protocolVersion?: number
   authMethods?: Array<{ id?: string; name?: string }>
+  authRequired?: boolean
+  _meta?: { defaultAuthMethodId?: string; [key: string]: unknown }
 }
 
 /**
@@ -39,7 +44,9 @@ export class AcpChild {
   private rpc: NdjsonRpc | undefined
   private spawned: SpawnedChild | undefined
   private sessionId: string | undefined
-  private configPayload: unknown = undefined
+  private readonly catalogSources: unknown[] = []
+  private authenticated = false
+  private initialize: InitializeResult | undefined
 
   constructor(private readonly options: AcpChildOptions) {}
 
@@ -49,27 +56,55 @@ export class AcpChild {
 
   /** Last config-option payload from initialize / session/new|load / updates. */
   get configOptions(): unknown[] {
-    return collectConfigOptions(this.configPayload)
+    return collectConfigOptions(this.catalogSources)
   }
 
   projectCatalog(provider: ProviderId): ProjectedCatalog {
-    return projectAcpModels(provider, this.configPayload)
+    return projectAcpModels(provider, this.catalogSources)
+  }
+
+  get calledAuthenticate(): boolean {
+    return this.authenticated
   }
 
   onUpdate: ((update: AcpUpdate) => void) | undefined
   onConfigOptions: ((payload: unknown) => void) | undefined
 
   private ingestConfigPayload(payload: unknown): void {
-    const options = collectConfigOptions(payload)
-    const record = payload !== null && typeof payload === 'object' && !Array.isArray(payload)
-      ? payload as Record<string, unknown>
-      : undefined
-    const hasLegacy = record !== undefined && (
-      record.models !== undefined || record.availableModels !== undefined || record.currentModelId !== undefined
-    )
-    if (options.length === 0 && !hasLegacy) return
-    this.configPayload = payload
-    this.onConfigOptions?.(payload)
+    if (!hasCatalogHints(payload)) return
+    this.catalogSources.push(payload)
+    this.onConfigOptions?.(this.catalogSources)
+  }
+
+  private defaultAuthMethod(init: InitializeResult): string | undefined {
+    const wanted = this.options.launch.authMethod
+    const methods = init.authMethods ?? []
+    if (wanted && methods.some(method => method.id === wanted)) return wanted
+    const advertised = init._meta?.defaultAuthMethodId
+    if (typeof advertised === 'string' && advertised && methods.some(method => method.id === advertised)) {
+      return advertised
+    }
+    return methods[0]?.id
+  }
+
+  private authRequiredError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+    return message.includes('auth required')
+      || message.includes('unauthenticated')
+      || message.includes('unauthorized')
+      || message.includes('not authenticated')
+      || message.includes('authentication required')
+  }
+
+  private async authenticateIfNeeded(init: InitializeResult, force: boolean): Promise<void> {
+    if (this.authenticated) return
+    if (!force && init.authRequired !== true) return
+    const method = this.defaultAuthMethod(init)
+    if (!method) return
+    const rpc = this.rpc
+    if (rpc === undefined) return
+    await rpc.request('authenticate', { methodId: method })
+    this.authenticated = true
   }
 
   async ensure(): Promise<string> {
@@ -106,16 +141,15 @@ export class AcpChild {
       },
       clientInfo: { name: 'lumine-dsh-acp-session', version: '0.1.0' },
     }) as InitializeResult
+    this.initialize = init
     this.ingestConfigPayload(init)
-    const wanted = this.options.launch.authMethod
-    const methods = init.authMethods ?? []
-    if (wanted && methods.some(method => method.id === wanted)) {
-      await rpc.request('authenticate', { methodId: wanted })
-    }
+    // Grok 1.0.5 (and others) open a session without authenticate.
+    // Do not scrape tokens or call authenticate unless the child requires it.
+    await this.authenticateIfNeeded(init, false)
 
     if (this.options.resumeSessionId) {
       try {
-        const loaded = await rpc.request('session/load', {
+        const loaded = await this.requestWithAuthRetry('session/load', {
           sessionId: this.options.resumeSessionId,
           cwd: this.options.cwd,
           mcpServers: [],
@@ -128,7 +162,7 @@ export class AcpChild {
       }
     }
 
-    const created = await rpc.request('session/new', {
+    const created = await this.requestWithAuthRetry('session/new', {
       cwd: this.options.cwd,
       mcpServers: [],
     }) as { sessionId?: unknown }
@@ -138,6 +172,20 @@ export class AcpChild {
     }
     this.sessionId = created.sessionId
     return this.sessionId
+  }
+
+  private async requestWithAuthRetry(method: string, params: unknown): Promise<unknown> {
+    const rpc = this.rpc
+    if (rpc === undefined) throw new Error('ACP RPC missing')
+    try {
+      return await rpc.request(method, params)
+    } catch (error: unknown) {
+      if (this.authenticated || !this.authRequiredError(error) || this.initialize === undefined) {
+        throw error
+      }
+      await this.authenticateIfNeeded(this.initialize, true)
+      return await rpc.request(method, params)
+    }
   }
 
   /**
@@ -171,11 +219,11 @@ export class AcpChild {
   async applyHostSelection(provider: ProviderId, selection: { model: string; reasoningEffort?: string }): Promise<void> {
     const catalog = this.projectCatalog(provider)
     if (selection.model && selection.model !== catalog.currentModel) {
-      await this.setConfigOption(catalog.modelConfigId, selection.model)
+      await this.setConfigOption(configIdForModel(catalog, selection.model), selection.model)
     }
     const next = this.projectCatalog(provider)
     if (selection.reasoningEffort && next.reasoning && selection.reasoningEffort !== next.reasoning.current) {
-      await this.setConfigOption(next.reasoning.configId, selection.reasoningEffort)
+      await this.setConfigOption(configIdForReasoning(next, selection.reasoningEffort), selection.reasoningEffort)
     }
   }
 

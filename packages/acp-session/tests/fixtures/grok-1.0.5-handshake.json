@@ -1,0 +1,99 @@
+{
+  "initialize": {
+    "protocolVersion": 1,
+    "authMethods": [
+      { "id": "cached_token", "name": "Cached token" },
+      { "id": "grok.com", "name": "grok.com" }
+    ],
+    "_meta": {
+      "defaultAuthMethodId": "cached_token",
+      "modelState": {
+        "currentModelId": "grok-4.6",
+        "availableModels": [
+          {
+            "modelId": "grok-4.6",
+            "name": "Grok 4.6",
+            "reasoningEfforts": [
+              { "id": "xhigh", "name": "X-High" },
+              { "id": "high", "name": "High", "default": true },
+              { "id": "medium", "name": "Medium" },
+              { "id": "low", "name": "Low" }
+            ]
+          },
+          {
+            "modelId": "grok-4.5",
+            "name": "Grok 4.5",
+            "reasoningEfforts": [
+              { "id": "high", "name": "High", "default": true },
+              { "id": "medium", "name": "Medium" },
+              { "id": "low", "name": "Low" }
+            ]
+          }
+        ]
+      }
+    },
+    "modelState": {
+      "currentModelId": "grok-4.6",
+      "availableModels": [
+        {
+          "modelId": "grok-4.6",
+          "name": "Grok 4.6",
+          "reasoningEfforts": [
+            { "id": "xhigh", "name": "X-High" },
+            { "id": "high", "name": "High", "default": true },
+            { "id": "medium", "name": "Medium" },
+            { "id": "low", "name": "Low" }
+          ]
+        },
+        {
+          "modelId": "grok-4.5",
+          "name": "Grok 4.5",
+          "reasoningEfforts": [
+            { "id": "high", "name": "High", "default": true },
+            { "id": "medium", "name": "Medium" },
+            { "id": "low", "name": "Low" }
+          ]
+        }
+      ]
+    }
+  },
+  "sessionNew": {
+    "sessionId": "acp-session-1",
+    "models": {
+      "currentModelId": "grok-4.6",
+      "availableModels": [
+        {
+          "modelId": "grok-4.6",
+          "name": "Grok 4.6",
+          "reasoningEfforts": [
+            { "id": "xhigh", "name": "X-High" },
+            { "id": "high", "name": "High", "default": true },
+            { "id": "medium", "name": "Medium" },
+            { "id": "low", "name": "Low" }
+          ]
+        },
+        {
+          "modelId": "grok-4.5",
+          "name": "Grok 4.5",
+          "reasoningEfforts": [
+            { "id": "high", "name": "High", "default": true },
+            { "id": "medium", "name": "Medium" },
+            { "id": "low", "name": "Low" }
+          ]
+        }
+      ]
+    },
+    "_meta": {
+      "x.ai/sessionConfig": {
+        "options": [
+          { "id": "grok-4.6", "category": "model", "label": "Grok 4.6", "selected": true },
+          { "id": "grok-4.5", "category": "model", "label": "Grok 4.5", "selected": false },
+          { "id": "xhigh", "category": "mode", "label": "X-High", "selected": false },
+          { "id": "high", "category": "mode", "label": "High", "selected": true },
+          { "id": "medium", "category": "mode", "label": "Medium", "selected": false },
+          { "id": "low", "category": "mode", "label": "Low", "selected": false }
+        ]
+      }
+    }
+  }
+}

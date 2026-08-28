@@ -31,6 +31,8 @@ export { TurnProjector, lastBoundAcpSession, userMessageText } from './events.ts
 export {
   AcpCatalogAdapter,
   AcpCatalogRegistry,
+  configIdForModel,
+  configIdForReasoning,
   fallbackCatalog,
   lastModelSelection,
   pickerSnapshot,

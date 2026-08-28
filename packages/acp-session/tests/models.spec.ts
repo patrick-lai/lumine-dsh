@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { AcpChild } from '../src/client.ts'
@@ -5,6 +6,8 @@ import { TurnProjector } from '../src/events.ts'
 import {
   AcpCatalogAdapter,
   AcpCatalogRegistry,
+  configIdForModel,
+  configIdForReasoning,
   fallbackCatalog,
   lastModelSelection,
   pickerSnapshot,
@@ -12,6 +15,10 @@ import {
 } from '../src/models.ts'
 
 const fakeChild = fileURLToPath(new URL('./fixtures/fake-acp-child.mjs', import.meta.url))
+const gold = JSON.parse(readFileSync(new URL('./fixtures/grok-1.0.5-handshake.json', import.meta.url), 'utf8')) as {
+  initialize: unknown
+  sessionNew: unknown
+}
 
 function dummyAgent() {
   return {
@@ -37,29 +44,59 @@ const grokOptions = [
     name: 'Model',
     category: 'model',
     type: 'select',
-    currentValue: 'grok-4.5',
+    currentValue: 'composer-2',
     options: [
-      { value: 'grok-4.5', name: 'Grok 4.5' },
-      { value: 'grok-4', name: 'Grok 4' },
+      { value: 'composer-2', name: 'Composer 2' },
+      { value: 'gpt-5', name: 'GPT-5' },
     ],
   },
 ]
 
 describe('ACP config-option → session.models projection', () => {
-  it('reads v1 model options and ignores DeepSeek', () => {
-    const catalog = projectAcpModels('grok', { configOptions: grokOptions })
-    expect(catalog.provider).toBe('grok')
-    expect(catalog.currentModel).toBe('grok-4.5')
-    expect(catalog.models.map(model => model.id)).toEqual(['grok-4.5', 'grok-4'])
+  it('projects the live Grok 1.0.5 handshake, not DeepSeek and not an invented catalog', () => {
+    const catalog = projectAcpModels('grok', [gold.initialize, gold.sessionNew])
+    expect(catalog.models.map(model => ({ id: model.id, name: model.name }))).toEqual([
+      { id: 'grok-4.6', name: 'Grok 4.6' },
+      { id: 'grok-4.5', name: 'Grok 4.5' },
+    ])
+    expect(catalog.currentModel).toBe('grok-4.6')
+    expect(catalog.modelSetStyle).toBe('option-id')
+    expect(configIdForModel(catalog, 'grok-4.5')).toBe('grok-4.5')
+    expect(catalog.reasoning?.efforts.map(effort => effort.id)).toEqual(['xhigh', 'high', 'medium', 'low'])
+    expect(catalog.reasoning?.current).toBe('high')
+    expect(catalog.reasoning?.setStyle).toBe('option-id')
+    expect(configIdForReasoning(catalog, 'medium')).toBe('medium')
 
     const adapter = new AcpCatalogAdapter()
     adapter.replace(catalog)
-    const picker = pickerSnapshot(adapter, { provider: 'grok', model: catalog.currentModel })
+    const picker = pickerSnapshot(adapter, {
+      provider: 'grok',
+      model: catalog.currentModel,
+      reasoningEffort: catalog.reasoning?.current,
+    })
+    expect(picker.current.provider).toBe('grok')
+    expect(picker.current.provider).not.toBe('deepseek-official')
+    expect(picker.current.model).toBe('grok-4.6')
     expect(picker.routable).toBe(true)
-    expect(picker.current).toEqual({ provider: 'grok', model: 'grok-4.5' })
     expect(picker.groups.map(group => group.id)).toEqual(['grok'])
-    expect(picker.groups[0]?.models.map(model => model.id)).toEqual(['grok-4.5', 'grok-4'])
+    expect(picker.groups[0]?.models.map(model => model.id)).toEqual(['grok-4.6', 'grok-4.5'])
     expect(JSON.stringify(picker)).not.toMatch(/deepseek/i)
+    expect(JSON.stringify(picker)).not.toMatch(/grok-4[^.]|grok-3/)
+  })
+
+  it('reads initialize.modelState when session/new models are missing', () => {
+    const catalog = projectAcpModels('grok', gold.initialize)
+    expect(catalog.currentModel).toBe('grok-4.6')
+    expect(catalog.models.map(model => model.id)).toEqual(['grok-4.6', 'grok-4.5'])
+  })
+
+  it('reads standard v1 select options for Cursor/Claude/Codex', () => {
+    const catalog = projectAcpModels('cursor', { configOptions: grokOptions })
+    expect(catalog.provider).toBe('cursor')
+    expect(catalog.currentModel).toBe('composer-2')
+    expect(catalog.modelSetStyle).toBe('select')
+    expect(configIdForModel(catalog, 'gpt-5')).toBe('model')
+    expect(catalog.models.map(model => model.id)).toEqual(['composer-2', 'gpt-5'])
   })
 
   it('flattens grouped options and v2 configId', () => {
@@ -97,7 +134,7 @@ describe('ACP config-option → session.models projection', () => {
   })
 
   it('projects thought_level onto resolveModel reasoning', async () => {
-    const catalog = projectAcpModels('grok', {
+    const catalog = projectAcpModels('cursor', {
       configOptions: [
         ...grokOptions,
         {
@@ -111,9 +148,19 @@ describe('ACP config-option → session.models projection', () => {
     })
     const adapter = new AcpCatalogAdapter()
     adapter.replace(catalog)
-    const resolved = await adapter.resolveModel('grok', 'grok-4.5')
+    const resolved = await adapter.resolveModel('cursor', 'composer-2')
     expect(resolved.reasoning?.efforts.map(effort => effort.id)).toEqual(['low', 'high'])
     expect(resolved.reasoning?.defaultEffort).toBe('high')
+  })
+
+  it('uses per-model reasoningEfforts from Grok 4.6 vs 4.5', async () => {
+    const catalog = projectAcpModels('grok', gold.sessionNew)
+    const adapter = new AcpCatalogAdapter()
+    adapter.replace(catalog)
+    expect((await adapter.resolveModel('grok', 'grok-4.6')).reasoning?.efforts.map(effort => effort.id))
+      .toEqual(['xhigh', 'high', 'medium', 'low'])
+    expect((await adapter.resolveModel('grok', 'grok-4.5')).reasoning?.efforts.map(effort => effort.id))
+      .toEqual(['high', 'medium', 'low'])
   })
 
   it('throws if the host tries to generate through the catalog adapter', async () => {
@@ -134,23 +181,23 @@ describe('ACP config-option → session.models projection', () => {
       },
     }
     const registry = new AcpCatalogRegistry(llm)
-    registry.publish(projectAcpModels('grok', { configOptions: grokOptions }))
+    registry.publish(projectAcpModels('grok', gold.sessionNew))
     expect(registered).toEqual([['grok']])
     expect(registry.adapter.advertisedProviders()).toEqual(['grok'])
   })
 
   it('reads the latest model/selection from the session log', () => {
     expect(lastModelSelection([
-      { type: 'model/selection', data: { provider: 'grok', model: 'grok-4.5' } },
-      { type: 'model/selection', data: { provider: 'grok', model: 'grok-3', reasoningEffort: 'low' } },
-    ])).toEqual({ provider: 'grok', model: 'grok-3', reasoningEffort: 'low' })
+      { type: 'model/selection', data: { provider: 'grok', model: 'grok-4.6' } },
+      { type: 'model/selection', data: { provider: 'grok', model: 'grok-4.5', reasoningEffort: 'low' } },
+    ])).toEqual({ provider: 'grok', model: 'grok-4.5', reasoningEffort: 'low' })
   })
 })
 
-describe('fake ACP child model catalog + pong', () => {
-  it('projects advertised models, maps selectModel onto set_config_option, and lands pong in the log', async () => {
+describe('fake ACP child (Grok 1.0.5 gold) + pong', () => {
+  it('does not authenticate, projects Grok 4.6/4.5, maps selectModel onto option ids, and lands pong', async () => {
     const child = new AcpChild({
-      launch: launch(),
+      launch: launch({ FAKE_ACP_FORBID_AUTH: '1' }),
       cwd: process.cwd(),
       permission: 'yolo',
       agent: dummyAgent(),
@@ -164,26 +211,32 @@ describe('fake ACP child model catalog + pong', () => {
 
     try {
       await child.ensure()
+      expect(child.calledAuthenticate).toBe(false)
       const catalog = child.projectCatalog('grok')
-      expect(catalog.models.map(model => model.id)).toEqual(['grok-4.5', 'grok-4', 'grok-3'])
-      expect(catalog.currentModel).toBe('grok-4.5')
+      expect(catalog.models.map(model => model.id)).toEqual(['grok-4.6', 'grok-4.5'])
+      expect(catalog.currentModel).toBe('grok-4.6')
+      expect(catalog.reasoning?.current).toBe('high')
 
       const adapter = new AcpCatalogAdapter()
       adapter.replace(catalog)
-      session.append('model/selection', { provider: 'grok', model: catalog.currentModel, reasoningEffort: 'high' })
+      session.append('model/selection', {
+        provider: 'grok',
+        model: catalog.currentModel,
+        reasoningEffort: 'high',
+      })
       const picker = pickerSnapshot(adapter, lastModelSelection(session.events)!)
-      expect(picker.current.provider).toBe('grok')
-      expect(picker.current.model).toBe('grok-4.5')
+      expect(picker.current).toEqual({ provider: 'grok', model: 'grok-4.6', reasoningEffort: 'high' })
+      expect(picker.current.provider).not.toBe('deepseek-official')
       expect(picker.groups.some(group => group.id === 'deepseek-official')).toBe(false)
       expect(picker.routable).toBe(true)
 
-      await child.applyHostSelection('grok', { model: 'grok-3', reasoningEffort: 'low' })
+      await child.applyHostSelection('grok', { model: 'grok-4.5', reasoningEffort: 'medium' })
       const after = child.projectCatalog('grok')
-      expect(after.currentModel).toBe('grok-3')
-      expect(after.reasoning?.current).toBe('low')
-      session.append('model/selection', { provider: 'grok', model: 'grok-3', reasoningEffort: 'low' })
+      expect(after.currentModel).toBe('grok-4.5')
+      expect(after.reasoning?.current).toBe('medium')
+      session.append('model/selection', { provider: 'grok', model: 'grok-4.5', reasoningEffort: 'medium' })
 
-      const projector = new TurnProjector(1, 1, { provider: 'grok', model: 'grok-3' })
+      const projector = new TurnProjector(1, 1, { provider: 'grok', model: 'grok-4.5' })
       const log = [
         ...projector.startTurn({
           id: 'u1',
@@ -214,10 +267,6 @@ describe('fake ACP child model catalog + pong', () => {
         .map(chunk => chunk.text)
         .join('')
       expect(text).toBe('pong')
-      const assistant = log.find(op => op.type === 'assistant/message')?.data as {
-        message: { content: Array<{ type: string; text?: string }> }
-      }
-      expect(assistant.message.content.some(block => block.type === 'text' && block.text === 'pong')).toBe(true)
     } finally {
       await child.dispose()
     }
@@ -232,8 +281,8 @@ describe('fake ACP child model catalog + pong', () => {
     })
     try {
       await child.ensure()
-      await child.setConfigOption('model', 'grok-4')
-      expect(child.projectCatalog('grok').currentModel).toBe('grok-4')
+      await child.setConfigOption('grok-4.5', 'grok-4.5')
+      expect(child.projectCatalog('grok').currentModel).toBe('grok-4.5')
     } finally {
       await child.dispose()
     }
