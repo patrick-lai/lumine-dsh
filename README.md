@@ -1,2 +1,141 @@
 # lumine-dsh
-Lumine capabilities as DeepSeek Harness plugins. ACP sessions for Claude Code, Codex, Cursor, and Grok Build.
+
+Lumine capabilities as [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins. This repository is the install home: `dsh plugin --profile web add github:patrick-lai/lumine-dsh` gets everything. Packages inside can also be installed one-by-one later.
+
+**Today that is one plugin:** `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
+
+Keyword for discovery: `dsh-plugin`.
+
+## TOS stance
+
+We never scrape Keychain / `auth.json` tokens and never hit unofficial backends (`chatgpt.com/backend-api`, etc.).
+
+The session **spawns the official product process**. Usage bills the subscription already attached to that CLI:
+
+| Product | You install and log in | We spawn |
+|---|---|---|
+| Claude Code | `claude` (Pro/Max) | `npx -y @agentclientprotocol/claude-agent-acp` with `CLAUDE_CODE_EXECUTABLE` |
+| Codex | `codex login` (ChatGPT) | `npx -y @agentclientprotocol/codex-acp` with `CODEX_PATH` |
+| Cursor | `cursor-agent login` | `cursor-agent acp` |
+| Grok Build | `grok login` | `grok agent --always-approve stdio` |
+
+No API keys. `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` are not injected. Claude's adapter has `ANTHROPIC_API_KEY` unset so the Pro/Max login wins. We do not depend on V1ki/dsh-plugin-subscriptions or any token-scraping plugin.
+
+## The DSH seam (verified, not guessed)
+
+DSH's default `@deepseek-ai/dsh-agent-loop` is the host-plane **Agent factory**. `ctx.agents.setFactory()` is a unary slot and throws if a factory is already registered. Presets cannot publish host-plane services. An LLM adapter would still run DSH's tool loop. `@deepseek-ai/dsh-subagent-acp` is a one-shot *child* that returns only final text and does **not** put intermediate traffic in the parent log.
+
+So this plugin **replaces the Agent factory**:
+
+```yaml
+- id: agent-loop
+  disabled: true
+- insert:
+    - id: lumine-acp-session
+      name: '@lumine/dsh-acp-session'
+```
+
+Community pattern: `dsh-loop-dock`. v1 is an ACP-only profile (DeepSeek-native sessions in the same process would register as a loop-dock driver later).
+
+Creation copies DSH's transaction: `sessions.prepare` → construct Agent → `setup(agentCtx)` → `sessions.enter` → disposer → `sessions.announce` → `agents.enter` → `agents.announce` → `agent/session-start` → start driver.
+
+The Web UI picker is **agent presets**. On load we copy four presets into `$DSH_HOME/.agent-presets` (`claude-code`, `codex`, `cursor`, `grok-build`). Those compositions mount **no** DSH bash/fs/web tools — the child owns tools.
+
+Each user message is ACP `session/prompt`. `session/update` folds into DSH's append-only session log (`turn/start`, `user/message`, `assistant/chunk`, `tool/call`, `tool/result`, `assistant/message`, `turn/end`). Cancel is `session/cancel`. One long-lived CLI child per DSH session (`session/load` on resume). The official ACP session id is stored on the synthetic `request/context` row (`acpSessionId`) — DSH persistence refuses unknown event types on load, so a custom `lumine-acp/bound` type would break resume after restart.
+
+## Install
+
+Requires the `dsh` CLI. From a machine that already has Claude / Codex / Cursor / Grok logged in:
+
+```sh
+dsh plugin --profile web add github:patrick-lai/lumine-dsh
+```
+
+pnpm ≥ 10 refuses a git dependency's `prepare` until you allow it. The first `add` may fail and print the exact package key; put it in the profile `pnpm-workspace.yaml`:
+
+```yaml
+allowBuilds:
+  lumine-dsh: true
+```
+
+and re-run the `add`. `prepare` runs [tsdown](https://github.com/voidzero-dev/tsdown) so git installs get built entrypoints without a sibling DSH checkout.
+
+Local checkout:
+
+```sh
+dsh plugin --profile web add link:/absolute/path/to/lumine-dsh
+```
+
+One package only:
+
+```sh
+dsh plugin --profile web add link:/absolute/path/to/lumine-dsh/packages/acp-session
+```
+
+Then `dsh --profile web`. New session → pick **Claude Code**, **Codex**, **Cursor**, or **Grok Build**.
+
+## CLI prerequisites
+
+Command paths are configurable. Defaults follow PATH, plus `~/.local/bin` and `~/.grok/bin`.
+
+**Cursor is `cursor-agent`, not `agent`.** On some machines (including the author's) `agent` on PATH is Grok Build.
+
+| Provider | Default launch | Login | Docs |
+|---|---|---|---|
+| Grok Build | `grok agent --always-approve stdio` (flags after `agent`, before `stdio`) | `grok login` / SuperGrok / X Premium+ | https://github.com/xai-org/grok-build |
+| Cursor | `cursor-agent acp` | `cursor-agent login` / ACP `cursor_login` | https://cursor.com/docs/cli/acp |
+| Claude Code | `npx -y @agentclientprotocol/claude-agent-acp` | existing `claude` login; `CLAUDE_CODE_EXECUTABLE` | official ACP adapter |
+| Codex | `npx -y @agentclientprotocol/codex-acp` | `codex login`; `CODEX_PATH` | official ACP adapter |
+
+A missing CLI fails with `Install X and log in`, not a stack trace.
+
+## Config
+
+`cordis.patch.yml` / profile overlay on `id: lumine-acp-session`:
+
+```yaml
+- id: lumine-acp-session
+  config:
+    permission: yolo          # or ask (uses dsh-user-approval; still allows if no answerer)
+    defaultProvider: claude   # claude | codex | cursor | grok
+    providers:
+      cursor:
+        command: cursor-agent
+        args: [acp]
+      claude:
+        productCommand: claude
+      codex:
+        productCommand: codex
+        allowApiKey: false
+      grok:
+        command: grok
+        args: [agent, --always-approve, stdio]
+```
+
+Permission default is **yolo** (`allow_always` / `--always-approve` / bypass where the product supports it). Tool calls still land in the transcript.
+
+## Layout
+
+```
+lumine-dsh/                      # root bundle (dsh.bundle)
+  cordis.patch.yml
+  packages/acp-session/          # @lumine/dsh-acp-session (dsh.bundle)
+    src/                         # factory, ACP client, event map, command resolution
+    presets/                     # four picker rows, no DSH tools
+```
+
+## Develop
+
+```sh
+pnpm install
+pnpm build
+pnpm test
+```
+
+Tests use a fake ACP child. They do not require live CLIs.
+
+## What this is not
+
+- Not a fork of DeepSeek Harness.
+- Not a DSH tool-loop that delegates to these products as one-shot subagents.
+- Not an unofficial ChatGPT/Claude HTTP client.

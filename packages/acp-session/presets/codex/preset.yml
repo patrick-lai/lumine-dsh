@@ -1,0 +1,3 @@
+name: Codex
+description: The session is Codex via the official CLI (stdio ACP). Bills your existing ChatGPT/Codex login. No API key.
+order: 11

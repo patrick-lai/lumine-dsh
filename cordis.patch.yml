@@ -1,0 +1,13 @@
+# Lumine preset bundle. Disables the default DeepSeek agent-loop so an ACP
+# product (Claude Code, Codex, Cursor, or Grok Build) owns the session.
+# Later layers win by id; ctx.agents.setFactory() is a unary slot.
+
+- id: agent-loop
+  disabled: true
+
+- insert:
+    - id: lumine-acp-session
+      name: '@lumine/dsh-acp-session'
+      config:
+        permission: yolo
+        defaultProvider: claude

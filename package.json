@@ -1,0 +1,52 @@
+{
+  "name": "lumine-dsh",
+  "version": "0.1.0",
+  "description": "Lumine capabilities as DeepSeek Harness plugins. ACP sessions for Claude Code, Codex, Cursor, and Grok Build.",
+  "license": "MIT",
+  "type": "module",
+  "private": false,
+  "packageManager": "pnpm@10.14.0",
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/patrick-lai/lumine-dsh.git"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "lumine",
+    "acp",
+    "claude-code",
+    "codex",
+    "cursor",
+    "grok-build"
+  ],
+  "files": [
+    "cordis.patch.yml",
+    "LICENSE",
+    "README.md",
+    "packages/acp-session/package.json",
+    "packages/acp-session/cordis.patch.yml",
+    "packages/acp-session/lib",
+    "packages/acp-session/presets"
+  ],
+  "exports": {
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "prepare": "pnpm --dir packages/acp-session run build:prepare",
+    "build": "pnpm --filter @lumine/dsh-acp-session run build",
+    "test": "pnpm --filter @lumine/dsh-acp-session run test"
+  },
+  "dependencies": {
+    "@lumine/dsh-acp-session": "file:packages/acp-session"
+  }
+}
