@@ -14,9 +14,8 @@
       name: '@lumine/dsh-routines'
       config:
         defaultPreset: grok-build
-        tickMs: 15000
+        tickMs: 30000
         staleAfterMs: 21600000
-        grindMaxTurns: 8
 
 # Pin the in-page browse directory picker. directory-picker-auto picks native on
 # darwin; a detached `dsh` never shows the macOS dialog, so "+ Add workspace"

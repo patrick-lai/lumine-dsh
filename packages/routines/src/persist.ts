@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Routine } from './types.ts'
@@ -61,10 +61,15 @@ export function filePersist(path = defaultStorePath()): RoutinePersist {
       }
     },
     async save(snapshot) {
-      mkdirSync(dirname(path), { recursive: true })
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
       const tmp = `${path}.${process.pid}.tmp`
-      writeFileSync(tmp, `${JSON.stringify({ version: STORE_VERSION, routines: snapshot.routines }, null, 2)}\n`)
+      writeFileSync(
+        tmp,
+        `${JSON.stringify({ version: STORE_VERSION, routines: snapshot.routines }, null, 2)}\n`,
+        { mode: 0o600 },
+      )
       renameSync(tmp, path)
+      chmodSync(path, 0o600)
     },
   }
 }

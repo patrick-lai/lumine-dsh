@@ -14,7 +14,7 @@ describe('overlap guard', () => {
     }, now, 21_600_000)).toBe(false)
   })
 
-  it('frees a stale in-flight token so a crashed grind cannot silence the routine', () => {
+  it('frees a stale in-flight token so a crashed run cannot silence the routine', () => {
     const run = beginRun(Date.parse('2025-12-31T12:00:00Z'), 'token-old')
     expect(isActiveRunBlocking(run, now, 3_600_000)).toBe(false)
     expect(shouldFire({

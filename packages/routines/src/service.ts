@@ -1,11 +1,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
-import { normalizeEventName } from './calendar.ts'
 import type { ResolvedConfig } from './config.ts'
-import { executeRoutineCommand } from './command.ts'
-import { deliverRoutine } from './deliver.ts'
 import { filePersist, openPersist, type RoutinePersist } from './persist.ts'
+import { RoutineRuntime } from './runtime.ts'
 import { RoutineStore } from './store.ts'
+import { registerRoutineTools } from './tools.ts'
 import type { CreateRoutineInput, Routine, UpdateRoutineInput } from './types.ts'
 import { RoutineError } from './types.ts'
 
@@ -23,18 +22,20 @@ export interface RoutineServiceOptions extends ResolvedConfig {
 }
 
 /**
- * Host-plane routine store and timer. RPC names mirror DSH `goal.*`:
- * `routine.create|list|update|delete|enable|runNow`.
+ * Host-plane routine store and timer. Model tools are routine_list / create /
+ * update / delete / run_now. `routine.enable` is host RPC / settings only.
  */
 export class RoutineService extends Service {
   static inject = ['agents']
 
   store: RoutineStore
+  runtime: RoutineRuntime
   readonly resolved: ResolvedConfig
   private readonly now: () => number
   private readonly pending = new Set<Promise<void>>()
-  private timer: ReturnType<typeof setInterval> | undefined
   private started = false
+  private toolsRegistered = false
+  private readonly persistOverride?: RoutinePersist
 
   constructor(ctx: Context, options: RoutineServiceOptions) {
     super(ctx, 'routines')
@@ -43,28 +44,28 @@ export class RoutineService extends Service {
       ...options.defaultWorkspaceCwd ? { defaultWorkspaceCwd: options.defaultWorkspaceCwd } : {},
       tickMs: options.tickMs,
       staleAfterMs: options.staleAfterMs,
-      grindMaxTurns: options.grindMaxTurns,
     }
     this.now = options.now ?? Date.now
-    this.store = new RoutineStore(options.persist ?? filePersist())
     this.persistOverride = options.persist
+    this.store = new RoutineStore(options.persist ?? filePersist(), this.resolved.staleAfterMs)
+    this.runtime = this.bindRuntime()
     ctx.effect(() => {
       void this.start()
       return () => this.stop()
-    }, 'lumineRoutines.timer()')
-    this.installHostEvents()
+    }, 'lumineRoutines.start()')
+    this.installTimer()
+    this.installTools()
     this.tryExportRemote()
-    ctx.inject(['commands'], commandCtx => {
-      commandCtx.commands?.register({
-        name: 'routine',
-        description: 'create or run a host-owned durable routine (not dsh-schedule)',
-        input: { hint: '[list|create <title> -- <prompt>|enable <id>|disable <id>|run <id>|delete <id>]' },
-        handler: invocation => executeRoutineCommand(this, invocation),
-      })
-    })
   }
 
-  private readonly persistOverride?: RoutinePersist
+  private bindRuntime(): RoutineRuntime {
+    return new RoutineRuntime(this.store, {
+      agents: this.ctx.agents,
+      sessions: this.ctx.sessions,
+      cwd: this.resolved.defaultWorkspaceCwd ?? process.cwd(),
+      defaultPreset: this.resolved.defaultPreset,
+    }, this.now)
+  }
 
   private isActive(): boolean {
     return this.started && !INACTIVE.has(this.ctx.fiber.state)
@@ -74,126 +75,56 @@ export class RoutineService extends Service {
     if (!this.persistOverride) {
       const persist = await openPersist(this.ctx)
       if (persist.kind === 'storageDomain') {
-        this.store = new RoutineStore(persist)
+        this.store = new RoutineStore(persist, this.resolved.staleAfterMs)
+        this.runtime.store = this.store
       }
     }
-    if (!this.store.loadedOnce) await this.store.load()
+    if (!this.store.loadedOnce) await this.store.load(this.now())
     this.started = true
-    if (this.timer === undefined) {
-      this.timer = setInterval(() => {
-        void this.tick()
-      }, this.resolved.tickMs)
-      this.timer.unref?.()
-    }
     await this.tick()
   }
 
   async stop(): Promise<void> {
     this.started = false
-    if (this.timer !== undefined) {
-      clearInterval(this.timer)
-      this.timer = undefined
-    }
     await Promise.allSettled([...this.pending])
   }
 
   async create(input: CreateRoutineInput): Promise<Routine> {
-    if (!this.store.loadedOnce) await this.store.load()
-    return this.store.create(input, this.now())
+    if (!this.store.loadedOnce) await this.store.load(this.now())
+    return this.runtime.create(input)
   }
 
   async list(): Promise<Routine[]> {
-    if (!this.store.loadedOnce) await this.store.load()
-    return this.store.list()
+    if (!this.store.loadedOnce) await this.store.load(this.now())
+    return this.runtime.list()
   }
 
   async update(id: string, input: UpdateRoutineInput): Promise<Routine> {
-    if (!this.store.loadedOnce) await this.store.load()
-    return this.store.update(id, input, this.now())
+    if (!this.store.loadedOnce) await this.store.load(this.now())
+    return this.runtime.update(id, input)
   }
 
   async delete(id: string): Promise<Routine> {
-    if (!this.store.loadedOnce) await this.store.load()
-    return this.store.delete(id)
+    if (!this.store.loadedOnce) await this.store.load(this.now())
+    return this.runtime.delete(id)
   }
 
+  /** Host RPC / settings only. Not a model tool. */
   async enable(id: string, enabled: boolean): Promise<Routine> {
-    if (!this.store.loadedOnce) await this.store.load()
-    return this.store.enable(id, enabled, this.now())
+    if (!this.store.loadedOnce) await this.store.load(this.now())
+    return this.runtime.enable(id, enabled)
   }
 
-  async runNow(id: string): Promise<Routine> {
-    if (!this.store.loadedOnce) await this.store.load()
-    return this.launch(id, { force: true, triggerKind: 'runNow' })
+  async runNow(id: string): Promise<{ sessionId?: string; routine: Routine }> {
+    if (!this.store.loadedOnce) await this.store.load(this.now())
+    const launched = await this.runtime.runNow(id)
+    return { ...launched, routine: this.store.require(id) }
   }
 
   async tick(): Promise<void> {
     if (!this.isActive()) return
-    if (!this.store.loadedOnce) await this.store.load()
-    const now = new Date(this.now())
-    for (const due of this.store.due(now, this.resolved.staleAfterMs)) {
-      void this.track(this.launch(due.routine.id, { triggerKind: 'schedule' }))
-    }
-  }
-
-  async handleHostEvent(name: string, payload: Record<string, string> = {}): Promise<string[]> {
-    if (!this.store.loadedOnce) await this.store.load()
-    const normalized = normalizeEventName(name)
-    if (!normalized) return []
-    const now = new Date(this.now())
-    const matched = this.store.eventMatches(normalized, now, this.resolved.staleAfterMs)
-    const ids: string[] = []
-    for (const routine of matched) {
-      void this.track(this.launch(routine.id, {
-        force: true,
-        triggerKind: 'event',
-        eventName: normalized,
-        extras: payload,
-      }))
-      ids.push(routine.id)
-    }
-    return ids
-  }
-
-  private async launch(id: string, options: {
-    force?: boolean
-    triggerKind?: string
-    eventName?: string
-    extras?: Record<string, string>
-  }): Promise<Routine> {
-    const now = new Date(this.now())
-    const claimed = await this.store.claimFire(id, now, {
-      staleAfterMs: this.resolved.staleAfterMs,
-      force: options.force,
-      triggerKind: options.triggerKind,
-      eventName: options.eventName,
-    })
-    const abort = new AbortController()
-    try {
-      const delivered = await deliverRoutine(
-        this.ctx,
-        this.resolved,
-        claimed.routine,
-        {
-          triggerKind: options.triggerKind ?? 'schedule',
-          ...options.eventName ? { eventName: options.eventName } : {},
-          ...options.extras,
-        },
-        abort.signal,
-      )
-      return await this.store.finishFire(id, claimed.activeRunId, {
-        sessionId: delivered.sessionId,
-        note: [claimed.missedCount > 0 ? `catch-up-once; ${claimed.missedCount} collapsed fire(s)` : undefined, delivered.note]
-          .filter(Boolean)
-          .join(' · '),
-      }, this.now())
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      this.ctx.logger.error(`lumine-routines: delivery failed for ${id}: ${message}`)
-      return await this.store.finishFire(id, claimed.activeRunId, {
-        note: `delivery failed: ${message}`,
-      }, this.now())
-    }
+    if (!this.store.loadedOnce) await this.store.load(this.now())
+    await this.track(this.runtime.runDue(this.now()))
   }
 
   private track(job: Promise<unknown>): Promise<void> {
@@ -204,30 +135,41 @@ export class RoutineService extends Service {
     return wrapped
   }
 
-  private installHostEvents(): void {
-    const emit = (name: string, payload: Record<string, string> = {}): void => {
-      void this.handleHostEvent(name, payload)
+  /**
+   * Use the existing cordis timer plugin (`ctx.interval`). Do not wrap a
+   * second timer service (`setInterval`).
+   */
+  private installTimer(): void {
+    const startTick = (host: { interval?: (callback: () => unknown, delay: number) => unknown }): void => {
+      if (typeof host.interval !== 'function') return
+      host.interval(() => {
+        void this.tick()
+      }, this.resolved.tickMs)
     }
-    this.ctx.on('agent/session-end', (payload: unknown) => {
-      const record = asRecord(payload)
-      emit('session-ended', {
-        ...record.id ? { sessionId: record.id } : {},
-        ...record.reason ? { reason: record.reason } : {},
-      })
+    if (typeof this.ctx.interval === 'function') {
+      startTick(this.ctx)
+      return
+    }
+    this.ctx.inject(['timer'], timerCtx => {
+      startTick(timerCtx)
     })
-    this.ctx.on('agent/error', (payload: unknown) => {
-      const record = asRecord(payload)
-      emit('session-failed', {
-        ...record.id ? { sessionId: record.id } : {},
-        ...record.message ? { message: record.message } : {},
-      })
+  }
+
+  private installTools(): void {
+    const register = (host: { tools?: { register?: (tool: unknown) => unknown } }): void => {
+      if (this.toolsRegistered) return
+      const names = registerRoutineTools(host, this.runtime)
+      if (names.length > 0) this.toolsRegistered = true
+    }
+    register(this.ctx)
+    this.ctx.inject(['tools'], toolsCtx => {
+      register(toolsCtx)
     })
   }
 
   /**
-   * Official DSH RPC is `TypertRemoteService` + `@Remote`, which yields
-   * `goal.create` on `ctx.goals`. We mirror that as `routine.*` when the
-   * protocol package is present; otherwise in-process `ctx.routines` is enough.
+   * Official DSH RPC is `TypertRemoteService` + `@Remote`. Mirror `routine.*`
+   * when a duck-typed rpc facility exists. `routine.enable` is host-only.
    */
   private tryExportRemote(): void {
     const methods = {
@@ -250,22 +192,6 @@ export class RoutineService extends Service {
 export async function createRoutineService(ctx: Context, options: ResolvedConfig): Promise<RoutineService> {
   const persist = await openPersist(ctx)
   return new RoutineService(ctx, { ...options, persist })
-}
-
-function asRecord(payload: unknown): Record<string, string> {
-  if (typeof payload !== 'object' || payload === null) return {}
-  const source = payload as Record<string, unknown>
-  const nested = typeof source.agent === 'object' && source.agent !== null
-    ? source.agent as Record<string, unknown>
-    : source
-  const id = nested.id ?? source.id
-  const reason = source.reason ?? source.cause
-  const message = source.message ?? (source.error instanceof Error ? source.error.message : source.error)
-  return {
-    ...typeof id === 'string' ? { id } : {},
-    ...typeof reason === 'string' ? { reason } : {},
-    ...typeof message === 'string' ? { message } : {},
-  }
 }
 
 export { RoutineError }

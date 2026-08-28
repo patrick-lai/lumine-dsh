@@ -6,6 +6,7 @@ import {
   nextRun,
   parseCron,
   parseClock,
+  renderTemplate,
   ruleNext,
   shouldFire,
   windowContains,
@@ -30,6 +31,7 @@ function routine(partial: Partial<Routine> & Pick<Routine, 'rule'>): Routine {
     createdAt: Date.parse('2026-01-01T00:00:00Z'),
     updatedAt: Date.parse('2026-01-01T00:00:00Z'),
     runCount: 0,
+    deliveryFailures: 0,
     runs: [],
     ...partial,
   }
@@ -136,6 +138,13 @@ describe('quiet hours and windows', () => {
       runCount: 2,
     }), at('2026-01-01T00:00:00Z'))
     expect(next).toBeUndefined()
+  })
+})
+
+describe('template render', () => {
+  it('substitutes {{KEY}}, ${KEY}, and {KEY}', () => {
+    expect(renderTemplate('hi {{NAME}} ${WHEN} {WHO}', { NAME: 'Ada', WHEN: 'now', WHO: 'Ada' }))
+      .toBe('hi Ada now Ada')
   })
 })
 

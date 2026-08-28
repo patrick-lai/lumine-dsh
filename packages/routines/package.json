@@ -1,7 +1,7 @@
 {
   "name": "@lumine/dsh-routines",
   "version": "0.1.0",
-  "description": "Host-owned durable Lumine routines for DeepSeek Harness. Calendar cron/interval, quiet hours, overlap guard, and catch-up-once — not session-local dsh-schedule reminders.",
+  "description": "Host-owned durable Lumine routines for DeepSeek Harness. Clock-driven spawn into a new session. Model cannot arm unattended work. Not session-local dsh-schedule reminders.",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -43,19 +43,19 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-agent": "*",
-    "@deepseek-ai/dsh-commands": "*",
     "@deepseek-ai/dsh-llm": "*",
     "@deepseek-ai/dsh-session": "*",
     "@deepseek-ai/dsh-storage-domain": "*",
+    "@deepseek-ai/dsh-tools": "*",
     "@deepseek-ai/dsh-typert-protocol": "*"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": { "optional": true },
     "@deepseek-ai/dsh-agent": { "optional": true },
-    "@deepseek-ai/dsh-commands": { "optional": true },
     "@deepseek-ai/dsh-llm": { "optional": true },
     "@deepseek-ai/dsh-session": { "optional": true },
     "@deepseek-ai/dsh-storage-domain": { "optional": true },
+    "@deepseek-ai/dsh-tools": { "optional": true },
     "@deepseek-ai/dsh-typert-protocol": { "optional": true }
   },
   "devDependencies": {

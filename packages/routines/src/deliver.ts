@@ -1,134 +1,159 @@
-import type { Context } from '@deepseek-ai/cordis'
-import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
-import type { SessionId } from '@deepseek-ai/dsh-session'
 import { renderTemplate } from './calendar.ts'
-import type { ResolvedConfig } from './config.ts'
 import type { Routine } from './types.ts'
 
+function randomId(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+export interface AgentLike {
+  id?: string
+  sessionId?: string
+  session?: SessionLike
+  send?: (...args: unknown[]) => unknown
+}
+
+export interface AgentHandleLike {
+  agent?: AgentLike
+  dispose?: () => Promise<void> | void
+}
+
+export interface AgentsApi {
+  create: (opts?: Record<string, unknown>) => Promise<AgentHandleLike | AgentLike>
+}
+
+export interface SessionLike {
+  id?: string
+  append?: (type: string, data: unknown) => Promise<unknown> | unknown
+}
+
+export interface SessionsApi {
+  get?: (id: string) => Promise<SessionLike | undefined> | SessionLike | undefined
+}
+
+export interface DeliverContext {
+  agents?: AgentsApi
+  sessions?: SessionsApi
+  cwd?: string
+  defaultPreset?: string
+}
+
 export interface DeliveryResult {
-  readonly sessionId?: string
-  readonly note?: string
-  readonly usedFallback?: boolean
+  ok: boolean
+  sessionId?: string
+  note?: string
 }
 
-function asSessionId(id: string): SessionId {
-  return id as SessionId
+export function renderRoutinePrompt(routine: Routine, now: number = Date.now()): string {
+  return renderTemplate(routine.promptTemplate, routine.parameters, {
+    SCHEDULE_ID: routine.id,
+    SCHEDULE_TITLE: routine.title,
+    NOW_ISO: new Date(now).toISOString(),
+  })
 }
 
-function userMessage(text: string): import('@deepseek-ai/dsh-llm').UserMessage {
-  return {
-    id: crypto.randomUUID(),
-    role: 'user',
-    content: [{ type: 'text', text }],
-    source: { kind: 'user' },
+export function userMessageText(message: unknown): string {
+  if (typeof message === 'string') return message
+  if (typeof message !== 'object' || message === null) return ''
+  const record = message as { text?: unknown; content?: unknown }
+  if (typeof record.text === 'string') return record.text
+  if (!Array.isArray(record.content)) return ''
+  return record.content
+    .map(part => (typeof part === 'object' && part !== null && typeof (part as { text?: unknown }).text === 'string'
+      ? (part as { text: string }).text
+      : ''))
+    .join('')
+}
+
+function unwrapAgent(created: AgentHandleLike | AgentLike): AgentLike {
+  if (created && typeof created === 'object' && 'agent' in created && created.agent) {
+    return created.agent
   }
+  return created as AgentLike
 }
 
-async function makeUserMessage(text: string): Promise<import('@deepseek-ai/dsh-llm').UserMessage> {
+async function buildUserMessage(prompt: string): Promise<unknown> {
   try {
-    const llm = await import('@deepseek-ai/dsh-llm')
+    const llm = await import('@deepseek-ai/dsh-llm') as {
+      createUserMessage?: (input: {
+        content: unknown[]
+        source: { kind: string }
+      }) => unknown
+    }
     if (typeof llm.createUserMessage === 'function') {
       return llm.createUserMessage({
-        content: [{ type: 'text', text }],
+        content: [{ type: 'text', text: prompt }],
         source: { kind: 'user' },
       })
     }
   } catch {
-    // Official host without the helper still accepts a well-shaped user message.
+    // Unit tests and hosts without dsh-llm still get a user-shaped payload.
   }
-  return userMessage(text)
-}
-
-function resolveWorkspace(ctx: Context, config: ResolvedConfig, routine: Routine): string | undefined {
-  const named = routine.workspaceCwd?.trim() || config.defaultWorkspaceCwd?.trim()
-  if (named) return named
-  const registry = ctx.get<{ default?: { path?: string; cwd?: string }; list?: () => Array<{ path?: string; cwd?: string }> }>('workspaceRegistry')
-  const fallback = registry?.default?.path ?? registry?.default?.cwd ?? registry?.list?.()[0]?.path ?? registry?.list?.()[0]?.cwd
-  return fallback?.trim() || undefined
-}
-
-function promptSession(agent: Agent, message: import('@deepseek-ai/dsh-llm').UserMessage): void {
-  if (typeof agent.send === 'function') {
-    agent.send(message, 'next-turn', true)
-    return
+  return {
+    id: randomId('msg'),
+    role: 'user',
+    content: [{ type: 'text', text: prompt }],
+    source: { kind: 'user' },
   }
-  if (typeof agent.followup === 'function') {
-    agent.followup(message)
-  }
-}
-
-function looksComplete(agent: Agent): boolean {
-  const events = agent.session?.events ?? []
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
-    if (event?.type !== 'assistant/message' && event?.type !== 'assistant/chunk') continue
-    const data = event.data as { text?: string; content?: Array<{ text?: string }> } | undefined
-    const text = data?.text ?? data?.content?.map(block => block.text ?? '').join('') ?? ''
-    if (/^\s*GOAL REACHED:/m.test(text) || /^\s*BLOCKED:/m.test(text)) return true
-  }
-  return false
 }
 
 /**
- * v1 grind: hidden continue loop with a ceiling. Board/swarm/gnhf/co-read
- * are intentionally absent. If a /goal certifier is mounted we still use
- * this continue loop — we do not drive ctx.goals.
+ * Spawn a new DSH session via the already-registered Agent factory
+ * (`lumine-acp-session` or the stock loop). The first user message is the
+ * rendered prompt. Stamp `routineId` on the known `request/context` event —
+ * DSH persistence rejects unknown types. Never write `schedule/change`.
  */
-async function grindContinue(agent: Agent, routine: Routine, config: ResolvedConfig, signal: AbortSignal): Promise<string> {
-  const ceiling = routine.grind?.maxIterations && routine.grind.maxIterations > 0
-    ? routine.grind.maxIterations
-    : config.grindMaxTurns
-  let turns = 0
-  while (turns < ceiling) {
-    if (signal.aborted) return `grind aborted after ${turns} continue(s)`
-    if (typeof agent.whenIdle === 'function') {
-      await agent.whenIdle()
-    }
-    if (looksComplete(agent)) return `grind settled after ${turns} continue(s)`
-    turns += 1
-    if (turns > ceiling) break
-    const message = await makeUserMessage(
-      `PINNED ROUTINE — continue the objective (auto-continue ${turns}/${ceiling}). Do not wait for the operator.\n\n${routine.promptTemplate}`,
-    )
-    if (typeof agent.followup === 'function') agent.followup(message)
-    else promptSession(agent, message)
+export async function spawnRoutineSession(
+  ctx: DeliverContext,
+  routine: Routine,
+  now: number = Date.now(),
+): Promise<DeliveryResult> {
+  if (!ctx.agents?.create) {
+    return { ok: false, note: 'agents.create is not available' }
   }
-  return `grind v1 reached continue ceiling ${ceiling}`
+  const prompt = renderRoutinePrompt(routine, now)
+  const sessionId = randomId('routine')
+  try {
+    const created = await ctx.agents.create({
+      sessionId,
+      meta: {
+        cwd: routine.workspaceCwd ?? ctx.cwd ?? process.cwd(),
+        ...((routine.preset ?? ctx.defaultPreset)
+          ? { agentPreset: routine.preset ?? ctx.defaultPreset }
+          : {}),
+      },
+    })
+    const agent = unwrapAgent(created)
+    const spawnedId = String(agent.id ?? agent.sessionId ?? sessionId)
+    await stampRoutineContext(ctx, agent, spawnedId, routine.id)
+    if (typeof agent.send === 'function') {
+      const message = await buildUserMessage(prompt)
+      const sent = agent.send(message, 'next-turn', true)
+      if (sent !== undefined && typeof (sent as Promise<unknown>).then === 'function') {
+        await sent
+      }
+    }
+    return { ok: true, sessionId: spawnedId }
+  } catch (error) {
+    return {
+      ok: false,
+      note: error instanceof Error ? error.message : String(error),
+    }
+  }
 }
 
-export async function deliverRoutine(
-  ctx: Context,
-  config: ResolvedConfig,
-  routine: Routine,
-  extras: Record<string, string> = {},
-  signal: AbortSignal,
-): Promise<DeliveryResult> {
-  const agents = ctx.agents ?? ctx.get<Context['agents']>('agents')
-  if (!agents || typeof agents.create !== 'function') {
-    throw new Error('DSH agents.create is unavailable; cannot spawn a routine session')
+async function stampRoutineContext(
+  ctx: DeliverContext,
+  agent: AgentLike,
+  sessionId: string,
+  routineId: string,
+): Promise<void> {
+  const fromAgent = agent.session
+  if (fromAgent && typeof fromAgent.append === 'function') {
+    await fromAgent.append('request/context', { routineId })
+    return
   }
-  const cwd = resolveWorkspace(ctx, config, routine)
-  const preset = routine.preset?.trim() || config.defaultPreset
-  const prompt = renderTemplate(routine.promptTemplate, routine.parameters, {
-    title: routine.title,
-    mode: routine.mode,
-    ...extras,
-  })
-  const handle: AgentHandle = await agents.create({
-    sessionId: asSessionId(crypto.randomUUID()),
-    meta: {
-      ...cwd ? { cwd } : {},
-      agentPreset: preset,
-    },
-    signal,
-  })
-  const sessionId = String(handle.agent.id)
-  const message = await makeUserMessage(prompt)
-  promptSession(handle.agent, message)
-  let note = `spawned ${preset}${cwd ? ` in ${cwd}` : ''}`
-  if (routine.mode === 'grind') {
-    note = `${note}; grind v1 continue loop`
-    note = `${note}; ${await grindContinue(handle.agent, routine, config, signal)}`
+  const session = await ctx.sessions?.get?.(sessionId)
+  if (session && typeof session.append === 'function') {
+    await session.append('request/context', { routineId })
   }
-  return { sessionId, note }
 }

@@ -15,6 +15,7 @@ export const apply = plugin.apply
 export const resolveConfig = plugin.resolveConfig
 export const RoutineService = plugin.RoutineService
 export const RoutineStore = plugin.RoutineStore
+export const RoutineRuntime = plugin.RoutineRuntime
 export const filePersist = plugin.filePersist
 export const openPersist = plugin.openPersist
 export const cronNext = plugin.cronNext
@@ -24,7 +25,8 @@ export const nextRun = plugin.nextRun
 export const parseCron = plugin.parseCron
 export const shouldFire = plugin.shouldFire
 export const windowContains = plugin.windowContains
-export const parseRoutineCommand = plugin.parseRoutineCommand
+export const ROUTINE_TOOL_NAMES = plugin.ROUTINE_TOOL_NAMES
+export const registerRoutineTools = plugin.registerRoutineTools
 export const DSH_PEERS = plugin.DSH_PEERS
 export const RoutineError = plugin.RoutineError
 export { ensureDshPeers }

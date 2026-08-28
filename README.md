@@ -5,7 +5,7 @@ Lumine capabilities as [DeepSeek Harness](https://github.com/deepseek-ai/deepsee
 **Today that is two plugins:**
 
 - `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
-- `@lumine/dsh-routines` — host-owned durable automations (calendar cron/interval, quiet hours, overlap guard, catch-up-once). They sit **beside** official `@deepseek-ai/dsh-schedule`, which stays mounted as session-local reminders.
+- `@lumine/dsh-routines` — host-owned durable automations (calendar cron/interval, quiet hours, overlap guard, catch-up-once). The model can create paused rows only; an operator arms them. They sit **beside** official `@deepseek-ai/dsh-schedule`, which stays mounted as session-local reminders.
 
 Keyword for discovery: `dsh-plugin`.
 
@@ -105,22 +105,25 @@ Then `dsh --profile web`. New session → pick **Claude Code**, **Codex**, **Cur
 
 ## Routines
 
-`@lumine/dsh-routines` is a host-plane store. A routine survives process restart and fires even when no chat is open. It is **not** `@deepseek-ai/dsh-schedule`. That official package is still mounted: session-local reminders (`after` / `at` / `every_seconds`) that deliver inside a live conversation, with no calendar cron, quiet hours, events, or spawn.
+`@lumine/dsh-routines` is a host-plane store. A routine survives process restart and fires even when no chat is open. It is **not** `@deepseek-ai/dsh-schedule`. That official package stays mounted for same-session reminders (`schedule_list` / `schedule_create`). A routine fire is a **new** DSH session; the authoring session must still have an empty schedule fold.
 
-Create one through RPC (same naming as DSH `goal.*`):
+There is no `/routine` slash. Command palette in Lumine only opens a stage; DSH does not need that chrome.
 
-```
-routine.create { title, promptTemplate, rule: { kind: 'cron', cron: '0 9 * * 1-5' }, mode: 'cron' }
-routine.list
-routine.enable { id, enabled: true }
-routine.runNow { id }
-```
+Model tools (never `schedule_*`, never `schedule/change`):
 
-Or, when `dsh-commands` is composed, `/routine create morning-triage -- Review the inbox and write a 5-line brief.`
+- `routine_list`
+- `routine_create` — always persists `enabled: false`
+- `routine_update` — always persists `enabled: false`
+- `routine_delete`
+- `routine_run_now` — refuses a paused row
 
-`cron` delivery calls `agents.create` in the configured workspace (or the default workspace) with the `grok-build` preset, then `session.prompt` with the rendered template. It never steals an already-open operator session. `grind` is the same spawn plus a v1 hidden-continue loop with a ceiling — not Lumine board/swarm grind.
+`routine.enable` is host RPC / settings only. The model cannot arm unattended work.
 
-State is stored via `ctx.storageDomain` when that service exists, otherwise `$DSH_HOME/lumine-routines/routines.json`. Never in the session event log.
+Clock: `once` | `interval(seconds)` | five-field cron | `manual`. Quiet hours are IANA (wrapping night arcs ok). Catch-up is one fire plus a missed-count note. Failed delivery retries up to 3 ticks, then advances.
+
+Fire calls the already-registered Agent factory (`lumine-acp-session` or the stock loop). The first user message is the rendered prompt (`{{KEY}}` / `${KEY}` plus `SCHEDULE_ID`, `SCHEDULE_TITLE`, `NOW_ISO`). `routineId` is stamped on `request/context`.
+
+State lives in `ctx.storageDomain` when that service exists, otherwise `$DSH_HOME/lumine-routines/routines.json` at mode `0600`. The tick is `ctx.interval(30000)` via the existing cordis timer plugin.
 
 The package-only overlay (`packages/routines/cordis.patch.yml`) inserts this plugin only. It does not disable `agent-loop` (ACP session already does) and it does not re-insert `directory-picker-browse`.
 

@@ -15,10 +15,10 @@ import { fileURLToPath } from 'node:url'
 export const DSH_PEERS = [
   '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-agent',
-  '@deepseek-ai/dsh-commands',
   '@deepseek-ai/dsh-llm',
   '@deepseek-ai/dsh-session',
   '@deepseek-ai/dsh-storage-domain',
+  '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-typert-protocol',
 ] as const
 

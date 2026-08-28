@@ -2,7 +2,8 @@
  * Host-owned durable routines for DeepSeek Harness.
  *
  * Sits beside `@deepseek-ai/dsh-schedule` (session-local reminders) and
- * beside `@lumine/dsh-acp-session`. Never stored in the session event log.
+ * beside `@lumine/dsh-acp-session`. Model tools are routine_* only — never
+ * schedule_* and never schedule/change. There is no /routine slash.
  *
  * Loaded via `src/index.ts` after DSH peers are linked. Do not import this
  * file from the package `main` until `ensureDshPeers()` has run.
@@ -21,6 +22,7 @@ export type { Config } from './config.ts'
 export { resolveConfig } from './config.ts'
 export { RoutineService } from './service.ts'
 export { RoutineStore } from './store.ts'
+export { RoutineRuntime } from './runtime.ts'
 export { filePersist, openPersist } from './persist.ts'
 export {
   cronNext,
@@ -31,7 +33,7 @@ export {
   shouldFire,
   windowContains,
 } from './calendar.ts'
-export { parseRoutineCommand } from './command.ts'
+export { ROUTINE_TOOL_NAMES, registerRoutineTools } from './tools.ts'
 export { ensureDshPeers, DSH_PEERS } from './peers.ts'
 export { RoutineError } from './types.ts'
 export type { CreateRoutineInput, Routine, RoutineRule, UpdateRoutineInput } from './types.ts'

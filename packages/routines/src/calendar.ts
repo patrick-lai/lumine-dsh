@@ -405,7 +405,11 @@ export function assertRule(rule: RoutineRule): RoutineRule {
 
 export function renderTemplate(template: string, parameters: Record<string, string>, extras: Record<string, string> = {}): string {
   const values = { ...parameters, ...extras }
-  return template.replace(/\{([a-zA-Z0-9_-]+)\}/g, (match, key: string) => values[key] ?? match)
+  const lookup = (_match: string, key: string): string => values[key] ?? values[key.toUpperCase()] ?? values[key.toLowerCase()] ?? _match
+  return template
+    .replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, lookup)
+    .replace(/\$\{\s*([A-Za-z0-9_]+)\s*\}/g, lookup)
+    .replace(/\{([A-Za-z0-9_]+)\}/g, lookup)
 }
 
 export function normalizeEventName(raw: string): string | undefined {

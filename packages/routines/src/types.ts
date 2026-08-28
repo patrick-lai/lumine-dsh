@@ -1,5 +1,5 @@
-/** Cron = spawn + one prompt. Grind = same spawn, then hidden continue. */
-export type RoutineMode = 'cron' | 'grind'
+/** v1 delivery is always a new session + one prompt. */
+export type RoutineMode = 'cron'
 
 export type RoutineRule =
   | { readonly kind: 'once'; readonly at: number }
@@ -68,6 +68,7 @@ export interface Routine {
   readonly lastEventFireAt?: number
   readonly nextRunAt?: number
   readonly runCount: number
+  readonly deliveryFailures: number
   readonly runs: ScheduleRun[]
   readonly activeRun?: ActiveRun
 }
@@ -76,7 +77,6 @@ export interface CreateRoutineInput {
   readonly title: string
   readonly promptTemplate: string
   readonly parameters?: Record<string, string>
-  readonly enabled?: boolean
   readonly timezone?: string
   readonly rule: RoutineRule
   readonly quietHours?: ScheduleWindow

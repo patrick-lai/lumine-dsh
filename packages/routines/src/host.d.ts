@@ -9,8 +9,9 @@ declare module '@deepseek-ai/cordis' {
     logger: { warn(...args: unknown[]): void; info(...args: unknown[]): void; error(...args: unknown[]): void }
     agents: import('@deepseek-ai/dsh-agent').AgentRegistry
     sessions?: import('@deepseek-ai/dsh-session').SessionStore
-    commands?: import('@deepseek-ai/dsh-commands').CommandRuntime
+    tools?: { register(tool: unknown): unknown }
     routines?: unknown
+    interval(callback: () => unknown, delay: number): () => void
     get<T = unknown>(name: string): T | undefined
     effect(fn: () => (() => unknown) | void, label?: string): () => Promise<void> | void
     plugin(plugin: unknown, config?: unknown): { ctx: Context; dispose: () => Promise<void> | void }
@@ -126,29 +127,13 @@ declare module '@deepseek-ai/dsh-agent' {
   }
 }
 
-declare module '@deepseek-ai/dsh-commands' {
-  import type { Agent } from '@deepseek-ai/dsh-agent'
-
-  export interface CommandInvocation {
-    readonly rawInput: string
-    readonly agent: Agent
-    readonly signal: AbortSignal
-  }
-
-  export type CommandResult =
-    | { readonly kind: 'success'; readonly text?: string }
-    | { readonly kind: 'error'; readonly text: string }
-
-  export interface CommandDefinition {
-    readonly name: string
-    readonly description: string
-    readonly input?: { readonly hint: string }
-    readonly handler: (invocation: CommandInvocation) => CommandResult | Promise<CommandResult>
-  }
-
-  export interface CommandRuntime {
-    register(definition: CommandDefinition): () => void
-  }
+declare module '@deepseek-ai/dsh-tools' {
+  export function defineTool(definition: {
+    name: string
+    description: string
+    inputSchema?: unknown
+    execute: (args: Record<string, unknown>) => unknown
+  }): unknown
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {

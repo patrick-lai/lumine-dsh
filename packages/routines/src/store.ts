@@ -1,3 +1,4 @@
+import { MAX_DELIVERY_FAILURES } from './config.ts'
 import { defaultTimeZone } from './timezone.ts'
 import { assertRule, beginRun, endRunMatches, isActiveRunBlocking, missedFireCount, nextRun, shouldFire } from './calendar.ts'
 import type { RoutinePersist } from './persist.ts'
@@ -14,12 +15,22 @@ export class RoutineStore {
   private routines = new Map<string, Routine>()
   private loaded = false
 
-  constructor(private readonly persist: RoutinePersist) {}
+  constructor(
+    private readonly persist: RoutinePersist,
+    private readonly staleAfterMs = 21_600_000,
+  ) {}
 
-  async load(): Promise<void> {
+  async load(now = Date.now()): Promise<void> {
     const snapshot = await this.persist.load()
-    this.routines = new Map(snapshot.routines.map(routine => [routine.id, routine]))
+    this.routines = new Map()
+    let dirty = false
+    for (const raw of snapshot.routines) {
+      const routine = recoverOnLoad(raw, now, this.staleAfterMs)
+      if (routine !== raw) dirty = true
+      this.routines.set(routine.id, routine)
+    }
     this.loaded = true
+    if (dirty) await this.flush()
   }
 
   private async flush(): Promise<void> {
@@ -40,6 +51,7 @@ export class RoutineStore {
     return routine
   }
 
+  /** Model and host create always land paused. Only `enable` can arm. */
   async create(input: CreateRoutineInput, now = Date.now()): Promise<Routine> {
     const title = input.title.trim()
     const promptTemplate = input.promptTemplate.trim()
@@ -52,20 +64,19 @@ export class RoutineStore {
       title,
       promptTemplate,
       parameters: { ...input.parameters ?? {} },
-      enabled: input.enabled !== false,
+      enabled: false,
       timezone,
       rule,
       ...input.quietHours ? { quietHours: withZone(input.quietHours, timezone) } : {},
       ...input.window ? { window: withZone(input.window, timezone) } : {},
       ...input.maxRuns !== undefined ? { maxRuns: input.maxRuns } : {},
-      mode: input.mode === 'grind' ? 'grind' : 'cron',
+      mode: 'cron',
       ...input.workspaceCwd?.trim() ? { workspaceCwd: input.workspaceCwd.trim() } : {},
       ...input.preset?.trim() ? { preset: input.preset.trim() } : {},
-      ...input.event ? { event: normalizeEvent(input.event) } : {},
-      ...input.grind ? { grind: input.grind } : {},
       createdAt: now,
       updatedAt: now,
       runCount: 0,
+      deliveryFailures: 0,
       runs: [],
     }
     const routine = withNextRun(draft, now)
@@ -74,11 +85,13 @@ export class RoutineStore {
     return routine
   }
 
+  /** Model/host update always persists `enabled: false`. */
   async update(id: string, input: UpdateRoutineInput, now = Date.now()): Promise<Routine> {
     const current = this.require(id)
     const timezone = input.timezone?.trim() || current.timezone
     const next: Routine = {
       ...current,
+      enabled: false,
       ...input.title !== undefined ? { title: requireText(input.title, 'title') } : {},
       ...input.promptTemplate !== undefined ? { promptTemplate: requireText(input.promptTemplate, 'promptTemplate') } : {},
       ...input.parameters !== undefined ? { parameters: { ...input.parameters } } : {},
@@ -95,11 +108,8 @@ export class RoutineStore {
           ? withZone(input.window, timezone)
           : current.window,
       maxRuns: input.maxRuns === null ? undefined : input.maxRuns ?? current.maxRuns,
-      ...input.mode !== undefined ? { mode: input.mode === 'grind' ? 'grind' : 'cron' } : {},
       workspaceCwd: input.workspaceCwd === null ? undefined : input.workspaceCwd ?? current.workspaceCwd,
       preset: input.preset === null ? undefined : input.preset ?? current.preset,
-      event: input.event === null ? undefined : input.event ? normalizeEvent(input.event) : current.event,
-      grind: input.grind === null ? undefined : input.grind ?? current.grind,
       updatedAt: now,
     }
     const routine = withNextRun(next, now)
@@ -115,6 +125,7 @@ export class RoutineStore {
     return routine
   }
 
+  /** Host RPC / settings only. Not a model tool. */
   async enable(id: string, enabled: boolean, now = Date.now()): Promise<Routine> {
     const current = this.require(id)
     const routine = withNextRun({ ...current, enabled, updatedAt: now }, now)
@@ -126,94 +137,124 @@ export class RoutineStore {
   due(now: Date, staleAfterMs?: number): FireDecision[] {
     const due: FireDecision[] = []
     for (const routine of this.routines.values()) {
-      if (!shouldFire(routine, now, staleAfterMs)) continue
+      if (!shouldFire(routine, now, staleAfterMs ?? this.staleAfterMs)) continue
       due.push({
         routine,
         missedCount: missedFireCount(routine, now),
-        activeRunId: '',
+        activeRunId: routine.activeRun?.id ?? '',
       })
     }
     return due
   }
 
   /**
-   * Claim a due or run-now fire. Sets the overlap token before any await
-   * so a second tick in the same turn already sees the routine as busy.
-   * Catch-up records collapsed fires but still launches exactly once.
+   * Claim a due fire. Sets the overlap token only — lastRunAt / nextRunAt
+   * commit in `finishFire` so a failed delivery can retry.
    */
   async claimFire(id: string, now: Date, options: {
     staleAfterMs?: number
     force?: boolean
-    triggerKind?: string
-    eventName?: string
   } = {}): Promise<FireDecision> {
     const current = this.require(id)
-    const blocking = isActiveRunBlocking(current.activeRun, now, options.staleAfterMs)
-    if (blocking) {
+    const staleAfterMs = options.staleAfterMs ?? this.staleAfterMs
+    if (isActiveRunBlocking(current.activeRun, now, staleAfterMs)) {
       throw new RoutineError(`routine "${id}" has an in-flight run`, 'ROUTINE_OVERLAP')
     }
-    if (!options.force && !shouldFire(current, now, options.staleAfterMs)) {
+    if (!current.enabled) {
+      throw new RoutineError(`routine "${id}" is paused`, 'ROUTINE_PAUSED')
+    }
+    if (!options.force && !shouldFire(current, now, staleAfterMs)) {
       throw new RoutineError(`routine "${id}" is not due`, 'ROUTINE_NOT_DUE')
     }
     const token = beginRun(now.getTime())
     const missedCount = options.force ? 0 : missedFireCount(current, now)
-    const run: ScheduleRun = {
-      id: token.id,
-      startedAt: now.getTime(),
-      triggerKind: options.triggerKind ?? (options.force ? 'runNow' : 'schedule'),
-      ...options.eventName ? { eventName: options.eventName } : {},
-      ...missedCount > 0 ? { missedCount, note: `catch-up-once; ${missedCount} collapsed fire(s)` } : {},
-    }
     const claimed: Routine = {
       ...current,
       activeRun: token,
-      lastRunAt: now.getTime(),
-      ...options.eventName ? { lastEventFireAt: now.getTime() } : {},
-      runCount: current.runCount + 1,
-      runs: [...current.runs, run].slice(-RUN_HISTORY_CAP),
       updatedAt: now.getTime(),
     }
-    const routine = withNextRun(claimed, now.getTime())
-    this.routines.set(id, routine)
+    this.routines.set(id, claimed)
     await this.flush()
-    return { routine, missedCount, activeRunId: token.id }
+    return { routine: claimed, missedCount, activeRunId: token.id }
   }
 
-  async finishFire(id: string, tokenId: string, patch: Partial<ScheduleRun> = {}, now = Date.now()): Promise<Routine> {
+  async finishFire(id: string, tokenId: string, result: {
+    ok: boolean
+    sessionId?: string
+    note?: string
+    missedCount?: number
+  }, now = Date.now()): Promise<Routine> {
     const current = this.require(id)
-    const runs = current.runs.map(run => run.id === tokenId ? { ...run, ...patch } : run)
-    const cleared = endRunMatches(current.activeRun, tokenId)
-    const next: Routine = {
+    if (!endRunMatches(current.activeRun, tokenId)) {
+      return current
+    }
+    const run: ScheduleRun = {
+      id: tokenId,
+      startedAt: current.activeRun?.startedAt ?? now,
+      ...result.sessionId ? { sessionId: result.sessionId } : {},
+      ...result.note ? { note: result.note } : {},
+      ...result.missedCount ? { missedCount: result.missedCount } : {},
+    }
+    if (result.ok) {
+      const committed: Routine = {
+        ...current,
+        activeRun: undefined,
+        lastRunAt: now,
+        runCount: current.runCount + 1,
+        deliveryFailures: 0,
+        runs: [...current.runs, run].slice(-RUN_HISTORY_CAP),
+        updatedAt: now,
+      }
+      const routine = withNextRun(committed, now)
+      this.routines.set(id, routine)
+      await this.flush()
+      return routine
+    }
+
+    const failures = current.deliveryFailures + 1
+    const exhausted = failures >= MAX_DELIVERY_FAILURES
+    const failed: Routine = {
       ...current,
-      runs,
-      ...cleared ? { activeRun: undefined } : {},
+      activeRun: undefined,
+      deliveryFailures: exhausted ? 0 : failures,
+      ...exhausted ? { lastRunAt: now } : {},
+      runs: [...current.runs, {
+        ...run,
+        note: exhausted
+          ? `${result.note ?? 'delivery failed'}; advanced after ${MAX_DELIVERY_FAILURES} failed ticks`
+          : `${result.note ?? 'delivery failed'}; retry ${failures}/${MAX_DELIVERY_FAILURES}`,
+      }].slice(-RUN_HISTORY_CAP),
       updatedAt: now,
     }
-    const routine = withNextRun(next, now)
+    const routine = exhausted ? withNextRun(failed, now) : failed
     this.routines.set(id, routine)
     await this.flush()
     return routine
   }
 
-  eventMatches(name: string, now: Date, staleAfterMs?: number): Routine[] {
-    const normalized = name.trim().toLowerCase()
-    const matched: Routine[] = []
-    for (const routine of this.routines.values()) {
-      if (!routine.enabled || !routine.event?.names.includes(normalized)) continue
-      const cooldown = (routine.event.cooldownSeconds ?? 2) * 1000
-      if (routine.lastEventFireAt !== undefined && now.getTime() - routine.lastEventFireAt < cooldown) continue
-      if (routine.activeRun && (staleAfterMs === undefined || staleAfterMs <= 0 || now.getTime() - routine.activeRun.startedAt < staleAfterMs)) {
-        continue
-      }
-      if (routine.maxRuns !== undefined && routine.runCount >= routine.maxRuns) continue
-      matched.push(routine)
-    }
-    return matched
-  }
-
   get loadedOnce(): boolean {
     return this.loaded
   }
+}
+
+function recoverOnLoad(routine: Routine, now: number, staleAfterMs: number): Routine {
+  const stale = routine.activeRun !== undefined && !isActiveRunBlocking(routine.activeRun, new Date(now), staleAfterMs)
+  const next: Routine = {
+    ...routine,
+    deliveryFailures: routine.deliveryFailures ?? 0,
+    runs: routine.runs ?? [],
+    mode: 'cron',
+    ...stale ? { activeRun: undefined } : {},
+  }
+  const recomputed = nextRun(next, new Date(now))
+  if (
+    stale
+    || next.deliveryFailures !== routine.deliveryFailures
+    || next.nextRunAt !== recomputed?.getTime()
+  ) {
+    return { ...next, nextRunAt: recomputed?.getTime() }
+  }
+  return { ...next, nextRunAt: recomputed?.getTime() }
 }
 
 function withNextRun(routine: Routine, now: number): Routine {
@@ -229,13 +270,4 @@ function requireText(value: string, field: string): string {
   const trimmed = value.trim()
   if (!trimmed) throw new RoutineError(`routine ${field} is required`, 'ROUTINE_INVALID')
   return trimmed
-}
-
-function normalizeEvent(event: NonNullable<CreateRoutineInput['event']>): NonNullable<Routine['event']> {
-  const names = [...new Set(event.names.map(name => name.trim().toLowerCase()).filter(Boolean))].sort()
-  if (names.length === 0) throw new RoutineError('event trigger requires at least one name', 'ROUTINE_INVALID')
-  return {
-    names,
-    ...event.cooldownSeconds !== undefined ? { cooldownSeconds: event.cooldownSeconds } : {},
-  }
 }
