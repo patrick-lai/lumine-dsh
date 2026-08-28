@@ -1,0 +1,7 @@
+{
+  "schema_version": "leyline.materialize.v1",
+  "path": "/tmp/ws",
+  "workspace_id": "ws_local",
+  "repo_id": "patrick-lai/lumine-dsh",
+  "max_memories": 12
+}

@@ -1,0 +1,61 @@
+{
+  "schema_version": "leyline.session_events.write.v1",
+  "source_client": {
+    "client_id": "lumine-dsh",
+    "client_version": "0.1.0",
+    "host_instance_id": null
+  },
+  "scope": {
+    "team_id": null,
+    "workspace_id": "ws_local",
+    "workspace_path": "/tmp/ws",
+    "repo_id": "patrick-lai/lumine-dsh",
+    "repo_fingerprint": null
+  },
+  "session": {
+    "source_session_id": "sess-1",
+    "agent_session_id": null,
+    "title": "grok-build",
+    "started_at": "2026-08-28T09:00:00Z",
+    "updated_at": "2026-08-28T09:30:00Z",
+    "deep_link": null
+  },
+  "events": [
+    {
+      "idempotency_key": "lumine-dsh-settle-sess-1",
+      "timestamp": "2026-08-28T09:30:00Z",
+      "peer_id": "lumine-dsh:harness",
+      "role": "system",
+      "content": [
+        {
+          "type": "text",
+          "text": "Outcome captured at session settlement by lumine-dsh (ground-truth result recorded after the agent session ended).\nGOAL: Fix flaky test\nRESULT: success · tests green\nSUMMARY: Root cause: race in the cache.\n\n----- TERMINAL TAIL (scrubbed) -----\nTest Suite passed"
+        }
+      ],
+      "tool_events": [],
+      "source_ref": null,
+      "metadata": {
+        "result": "success",
+        "duration_seconds": 1800,
+        "agent": "grok-build"
+      }
+    }
+  ],
+  "privacy": {
+    "raw_retention": "local_only",
+    "hosted_sync": "distilled_only",
+    "redaction_profile": "default",
+    "max_tool_preview_chars": 4096
+  },
+  "extensions": {
+    "lumine-dsh": {
+      "adapter": 1,
+      "receipt": {
+        "result": "success",
+        "label": "success · tests green",
+        "recall_ids": ["recall_abc123"],
+        "diff_stat": "+18 -4"
+      }
+    }
+  }
+}

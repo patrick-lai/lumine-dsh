@@ -1,0 +1,9 @@
+{
+  "schema_version": "leyline.lifecycle.v1",
+  "source_client_id": "lumine-dsh",
+  "kind": "workspace_removed",
+  "workspace_id": "ws_local",
+  "repo_id": "patrick-lai/lumine-dsh",
+  "branch": null,
+  "worktree_path": "/tmp/ws"
+}

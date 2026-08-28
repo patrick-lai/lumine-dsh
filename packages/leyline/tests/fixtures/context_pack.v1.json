@@ -1,0 +1,11 @@
+{
+  "query": "fix flaky test",
+  "scope": {
+    "workspace_id": "ws_local",
+    "repo_id": "patrick-lai/lumine-dsh"
+  },
+  "budget": {
+    "max_memories": 4,
+    "max_tokens": 1200
+  }
+}

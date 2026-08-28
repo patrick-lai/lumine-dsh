@@ -1,0 +1,11 @@
+{
+  "contract": 1,
+  "features": {
+    "session_events": 1,
+    "lifecycle": 1,
+    "context_pack": 1,
+    "materialize": 1,
+    "hygiene": 1,
+    "session_similarity": 1
+  }
+}

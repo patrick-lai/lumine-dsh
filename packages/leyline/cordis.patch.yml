@@ -1,0 +1,14 @@
+# One-by-one install of @lumine/dsh-leyline. Host adapter only.
+#
+# Do not disable agent-loop here — @lumine/dsh-acp-session already does that
+# on the root bundle. Do not re-insert directory-picker-browse. Do not
+# disable llm-deepseek.
+
+- insert:
+    - id: lumine-leyline
+      name: '@lumine/dsh-leyline'
+      config:
+        autoRecall: true
+        sessionEventCapture: true
+        spawnIfMissing: true
+        materializeLessons: false
