@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createAcpFallback } from '../src/acp-fallback.ts'
 import { createCertifier } from '../src/certifier.ts'
-import { fakeJudge } from '../src/judge.ts'
+import { createRuntimeJudge, fakeJudge, START_DID_NOT_SETTLE } from '../src/judge.ts'
 import { pluginNotice, recordVerdictNotice, verdictLine } from '../src/pin.ts'
 import { acpLog, makeAgent, makeGoal, makeSession, publishedAppend } from './helpers.ts'
 
@@ -92,5 +92,52 @@ describe('durable GOAL COMPLETION VERDICT append', () => {
     expect((durable[0]?.data as { content: Array<{ text: string }> }).content[0]?.text).toBe(
       'GOAL COMPLETION VERDICT: APPROVED - file is exactly pong',
     )
+  })
+
+  it('start() that never resolves emits UNVERIFIABLE, clears judging, and uses surfaceOp append', async () => {
+    const goal = makeGoal()
+    const start = vi.fn(() => new Promise(() => {}))
+    const session = makeSession(acpLog('GOAL REACHED: file is exactly pong'))
+    const durable = session.events as Array<{ type: string; seq: number; time: number; data: unknown; surfaceOp?: unknown }>
+    session.append = publishedAppend(durable) as typeof session.append
+    const agent = makeAgent(session)
+    const complete = vi.fn()
+    const judge = createRuntimeJudge({
+      logger: { warn() {}, info() {}, error() {} },
+      subagents: {
+        start,
+        list: () => ['acp'],
+        getProvider: () => ({ name: 'acp', capabilities: { toolFilter: true } }),
+      },
+    } as never, {
+      timeoutMs: 5_000,
+      startTimeoutMs: 25,
+      failClosed: true,
+      fakeJudge: false,
+    })
+    const fallback = createAcpFallback({
+      certifier: createCertifier({
+        judge,
+        complete,
+        getGoal: () => goal,
+        timeoutMs: 5_000,
+        failClosed: true,
+      }),
+      goals: { get: () => goal, complete, block: vi.fn() },
+      sessionIsLumineAcp: true,
+      roundDriverPresent: false,
+    })
+    const result = await fallback.onSettledTurn({ agent, session, endKind: 'completed' })
+    expect(start).toHaveBeenCalledOnce()
+    expect(result.action).toBe('halt')
+    expect(fallback.state(agent).judging).toBe(false)
+    expect(complete).not.toHaveBeenCalled()
+    const notices = durable.filter(event => event.type === 'user/message' && event.surfaceOp === 'append')
+    expect(notices).toHaveLength(1)
+    expect((notices[0]?.data as { content: Array<{ text: string }> }).content[0]?.text).toBe(
+      `GOAL COMPLETION VERDICT: UNVERIFIABLE - ${START_DID_NOT_SETTLE}`,
+    )
+    const second = await fallback.onSettledTurn({ agent, session, endKind: 'completed' })
+    expect(second.action).toBe('ignore')
   })
 })

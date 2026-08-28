@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { resolveConfig } from '../src/config.ts'
-import { createRuntimeJudge, judgeToolFilter, pickStartProvider } from '../src/judge.ts'
+import { createRuntimeJudge, judgeToolFilter, pickStartProvider, START_DID_NOT_SETTLE } from '../src/judge.ts'
 import { lastAssistantReply } from '../src/session.ts'
 import { acpChunkLog, assistantMessage, makeAgent, makeSession, turnEnd } from './helpers.ts'
 
@@ -196,6 +196,65 @@ describe('runtime judge start() shape', () => {
         capabilities: { toolFilter: name === 'spawn' },
       }),
     } as never)).toBe('spawn')
+  })
+
+  it('prefers acp over spawn on a lumine ACP parent so start() is not a hung DeepSeek spawn', () => {
+    expect(pickStartProvider({
+      list: () => ['spawn', 'acp'],
+      getProvider: (name: string) => ({
+        name,
+        capabilities: { toolFilter: true },
+      }),
+    } as never, makeAgent(makeSession()))).toBe('acp')
+  })
+
+  it('does not invent spawn when no provider is registered', async () => {
+    const start = vi.fn(async () => {
+      throw new Error('should not start')
+    })
+    const judge = createRuntimeJudge({
+      logger: { warn() {}, info() {}, error() {} },
+      subagents: { start, list: () => [] },
+    } as never, {
+      timeoutMs: 1_000,
+      failClosed: true,
+      fakeJudge: false,
+    })
+    const verdict = await judge({
+      goalId: 'goal-1',
+      revision: 1,
+      objective: 'x',
+      reply: 'y',
+      parent: makeAgent(makeSession()),
+    }, new AbortController().signal)
+    expect(start).not.toHaveBeenCalled()
+    expect(verdict).toEqual({ decision: 'UNVERIFIABLE', reason: 'no subagent provider is registered' })
+  })
+
+  it('hung start() fail-closes UNVERIFIABLE without waiting for the 15-minute abort', async () => {
+    const start = vi.fn(() => new Promise(() => {}))
+    const judge = createRuntimeJudge({
+      logger: { warn() {}, info() {}, error() {} },
+      subagents: {
+        start,
+        list: () => ['spawn'],
+        getProvider: () => ({ name: 'spawn', capabilities: { toolFilter: true } }),
+      },
+    } as never, {
+      timeoutMs: 1_000,
+      startTimeoutMs: 25,
+      failClosed: true,
+      fakeJudge: false,
+    })
+    const verdict = await judge({
+      goalId: 'goal-1',
+      revision: 1,
+      objective: 'x',
+      reply: 'GOAL REACHED: pong',
+      parent: makeAgent(makeSession()),
+    }, new AbortController().signal)
+    expect(start).toHaveBeenCalledOnce()
+    expect(verdict).toEqual({ decision: 'UNVERIFIABLE', reason: START_DID_NOT_SETTLE })
   })
 
   it('only denies registered write tools', () => {

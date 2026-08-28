@@ -10,11 +10,16 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CompletionCandidate, JudgeFn, ResolvedConfig, Verdict } from './config.ts'
+import { DEFAULT_START_TIMEOUT_MS } from './config.ts'
 import { VERDICT_MARKER, parseJudgeOutput } from './markers.ts'
+import { isLumineAcpSession } from './session.ts'
 
 export const CI_FAKE_REASON = 'CI fake judge does not certify'
 
 const PREFERRED_START_PROVIDERS = ['spawn', 'fork', 'spawn-in-process'] as const
+const ACP_PREFERRED_START_PROVIDERS = ['acp', ...PREFERRED_START_PROVIDERS] as const
+
+export const START_DID_NOT_SETTLE = 'subagents.start did not settle'
 
 const WRITE_TOOL_NAMES = new Set([
   'bash',
@@ -126,15 +131,21 @@ export function judgeToolFilter(ctx: Context): { allow?: string[]; deny?: string
   return { allow: [] }
 }
 
-export function pickStartProvider(subagents: NonNullable<Context['subagents']>): string | undefined {
+export function pickStartProvider(
+  subagents: NonNullable<Context['subagents']>,
+  worker?: { session?: { header?: { agentPreset?: string }; events?: ReadonlyArray<{ type: string; data?: unknown }> } },
+): string | undefined {
   const names = typeof subagents.list === 'function' ? subagents.list() : []
   const available = new Set(names)
+  const preferred = isLumineAcpSession(worker?.session)
+    ? ACP_PREFERRED_START_PROVIDERS
+    : PREFERRED_START_PROVIDERS
   const supportsFilter = (name: string): boolean | undefined => {
     const provider = subagents.getProvider?.(name)
     return provider?.capabilities?.toolFilter
   }
-  for (const name of PREFERRED_START_PROVIDERS) {
-    if (!available.has(name) && names.length > 0) continue
+  for (const name of preferred) {
+    if (names.length > 0 && !available.has(name)) continue
     if (names.length === 0 && !subagents.getProvider?.(name)) continue
     if (supportsFilter(name) !== false) return name
   }
@@ -144,17 +155,57 @@ export function pickStartProvider(subagents: NonNullable<Context['subagents']>):
   return names[0]
 }
 
+/** Race a start()/result promise against abort + a wall-clock watchdog. */
+export function raceStart<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+  timeoutMs: number,
+  hungReason = START_DID_NOT_SETTLE,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error(signal.reason === 'timeout' ? 'judge timed out' : 'verification was cancelled'))
+      return
+    }
+    const timer = setTimeout(() => {
+      reject(new Error(hungReason))
+    }, timeoutMs)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(new Error(signal.reason === 'timeout' ? 'judge timed out' : 'verification was cancelled'))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timer)
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
+}
+
 /**
  * Runtime judge. Never fabricates a DeepSeek credential and never calls a
  * DeepSeek adapter just to have a model. Missing `start()` → UNVERIFIABLE.
  */
-function resolveSubagents(ctx: Context): Context['subagents'] {
-  if (ctx.subagents) return ctx.subagents
+function readSubagents(scope: { subagents?: Context['subagents']; get?: (name: string) => unknown } | undefined): Context['subagents'] {
+  if (!scope) return undefined
+  if (scope.subagents) return scope.subagents
   try {
-    return ctx.get?.('subagents') as Context['subagents']
+    return scope.get?.('subagents') as Context['subagents']
   } catch {
     return undefined
   }
+}
+
+function resolveSubagents(ctx: Context, parent?: Agent): Context['subagents'] {
+  return readSubagents(parent?.ctx) ?? readSubagents(ctx)
 }
 
 export function createRuntimeJudge(ctx: Context, config: ResolvedConfig, worker?: { options?: { provider?: string }; session?: { header?: { agentPreset?: string } } }): JudgeFn {
@@ -165,7 +216,7 @@ export function createRuntimeJudge(ctx: Context, config: ResolvedConfig, worker?
     if (signal.aborted) return { decision: 'UNVERIFIABLE', reason: 'verification was cancelled' }
 
     const parent = candidate.parent ?? (worker as Agent | undefined)
-    const subagents = resolveSubagents(ctx)
+    const subagents = resolveSubagents(ctx, parent)
     if (!subagents || typeof subagents.start !== 'function') {
       ctx.logger.warn('lumine-goal-completion: subagents.start is missing; judge is UNVERIFIABLE')
       return { decision: 'UNVERIFIABLE', reason: 'no read-only judge is available' }
@@ -174,7 +225,11 @@ export function createRuntimeJudge(ctx: Context, config: ResolvedConfig, worker?
       return { decision: 'UNVERIFIABLE', reason: 'no parent agent for the isolated judge' }
     }
 
-    const providerName = pickStartProvider(subagents) ?? 'spawn'
+    const providerName = pickStartProvider(subagents, parent)
+    if (!providerName) {
+      ctx.logger.warn('lumine-goal-completion: no subagent provider is registered; judge is UNVERIFIABLE')
+      return { decision: 'UNVERIFIABLE', reason: 'no subagent provider is registered' }
+    }
     const provider = subagents.getProvider?.(providerName)
     const products = availableProducts(ctx)
     const chosen = preferDifferentProduct(workerProduct(parent) ?? workerProduct(worker ?? {}), products, config.judgePreset)
@@ -193,10 +248,12 @@ export function createRuntimeJudge(ctx: Context, config: ResolvedConfig, worker?
     if (provider?.capabilities?.toolFilter !== false) request.toolFilter = toolFilter
     if (chosen && provider?.capabilities?.agentOptions) request.agentOptions = { provider: chosen }
 
+    const startTimeoutMs = config.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS
     let run: Awaited<ReturnType<NonNullable<NonNullable<Context['subagents']>['start']>>> | undefined
     try {
-      run = await subagents.start(providerName, request)
-      const result = await run.result
+      ctx.logger.info(`lumine-goal-completion: starting judge via subagents.start(${providerName})`)
+      run = await raceStart(subagents.start(providerName, request), signal, startTimeoutMs)
+      const result = await raceStart(Promise.resolve(run.result), signal, config.timeoutMs, 'the isolated judge did not finish')
       if (result.stopReason && result.stopReason !== 'completed') {
         return { decision: 'UNVERIFIABLE', reason: `the isolated judge stopped: ${result.stopReason}` }
       }
@@ -205,6 +262,7 @@ export function createRuntimeJudge(ctx: Context, config: ResolvedConfig, worker?
       if (signal.aborted) return { decision: 'UNVERIFIABLE', reason: 'verification was cancelled' }
       const message = error instanceof Error ? error.message : String(error)
       ctx.logger.warn(`lumine-goal-completion: judge subagent failed: ${message}`)
+      if (message === START_DID_NOT_SETTLE) return { decision: 'UNVERIFIABLE', reason: START_DID_NOT_SETTLE }
       return { decision: 'UNVERIFIABLE', reason: 'the isolated judge did not finish' }
     } finally {
       try {

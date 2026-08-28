@@ -13,6 +13,7 @@ export const name = plugin.name
 export const inject = plugin.inject
 export const apply = plugin.apply
 export const resolveConfig = plugin.resolveConfig
+export const DEFAULT_START_TIMEOUT_MS = plugin.DEFAULT_START_TIMEOUT_MS
 export const createCertifier = plugin.createCertifier
 export const CANCEL_OPERATIONS = plugin.CANCEL_OPERATIONS
 export const scanMarkers = plugin.scanMarkers

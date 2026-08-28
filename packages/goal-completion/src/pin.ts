@@ -95,6 +95,10 @@ export function recordVerdictNotice(
 ): string {
   const text = verdictLine(verdict)
   const notice = pluginNotice(text, text)
-  agent.session?.append?.('user/message', notice, { surfaceOp: 'append' })
+  try {
+    agent.session?.append?.('user/message', notice, { surfaceOp: 'append' })
+  } catch {
+    // Publication can still fail; the caller keeps the verdict line.
+  }
   return text
 }

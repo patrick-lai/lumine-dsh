@@ -3,6 +3,12 @@ export interface Config {
   /** Judge wall-clock budget. Default 900000 (15 minutes). */
   timeoutMs?: number
   /**
+   * How long `subagents.start()` may sit without returning a run.
+   * Hung start() ignores the 15-minute abort signal; this watchdog
+   * fail-closes UNVERIFIABLE so `state.judging` cannot stick. Default 30000.
+   */
+  startTimeoutMs?: number
+  /**
    * When true (default), only an explicit APPROVED verdict may complete.
    * REJECTED, UNVERIFIABLE, timeout, cancel, and a missing judge keep the
    * goal active.
@@ -23,6 +29,7 @@ export interface Config {
 
 export interface ResolvedConfig {
   timeoutMs: number
+  startTimeoutMs: number
   failClosed: boolean
   judgePreset?: string
   fakeJudge: boolean
@@ -49,14 +56,20 @@ export interface Verdict {
 export type JudgeFn = (candidate: CompletionCandidate, signal: AbortSignal) => Promise<Verdict>
 
 export const DEFAULT_TIMEOUT_MS = 900_000
+export const DEFAULT_START_TIMEOUT_MS = 30_000
 
 export function resolveConfig(config: Config = {}): ResolvedConfig {
   const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new TypeError('timeoutMs must be a positive number')
   }
+  const startTimeoutMs = config.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS
+  if (!Number.isFinite(startTimeoutMs) || startTimeoutMs <= 0) {
+    throw new TypeError('startTimeoutMs must be a positive number')
+  }
   return {
     timeoutMs,
+    startTimeoutMs,
     failClosed: config.failClosed !== false,
     ...config.judgePreset === undefined ? {} : { judgePreset: config.judgePreset },
     fakeJudge: config.fakeJudge === true,
