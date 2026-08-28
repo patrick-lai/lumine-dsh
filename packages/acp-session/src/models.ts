@@ -180,6 +180,9 @@ export function projectAcpModels(
   const currentFromOption = typeof asRecord(modelOption)?.currentValue === 'string'
     ? asRecord(modelOption)?.currentValue as string
     : ''
+  if (models.length === 0 && !currentFromOption && !fromLegacy?.current) {
+    return fallbackCatalog(provider)
+  }
   const currentModel = currentFromOption
     || fromLegacy?.current
     || models[0]?.id
