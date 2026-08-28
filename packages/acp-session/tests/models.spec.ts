@@ -13,6 +13,7 @@ import {
   pickerSnapshot,
   projectAcpModels,
 } from '../src/models.ts'
+import { createHostLikeLlm } from './host-llm.ts'
 
 const fakeChild = fileURLToPath(new URL('./fixtures/fake-acp-child.mjs', import.meta.url))
 const gold = JSON.parse(readFileSync(new URL('./fixtures/grok-1.0.5-handshake.json', import.meta.url), 'utf8')) as {
@@ -174,18 +175,10 @@ describe('ACP config-option → session.models projection', () => {
   })
 
   it('registers only the ACP product on the host llm catalog', () => {
-    const registered: string[][] = []
-    const llm = {
-      registerAdapter(providers: string[]) {
-        registered.push([...providers])
-        const handle = (() => {}) as { (): void; replace(next: string[]): void }
-        handle.replace = (next: string[]) => { registered.push([...next]) }
-        return handle
-      },
-    }
+    const llm = createHostLikeLlm()
     const registry = new AcpCatalogRegistry(llm)
     registry.publish(projectAcpModels('grok', gold.sessionNew))
-    expect(registered).toEqual([['grok']])
+    expect(llm.listProviders().map(entry => entry.id)).toEqual(['grok'])
     expect(registry.adapter.advertisedProviders()).toEqual(['grok'])
   })
 

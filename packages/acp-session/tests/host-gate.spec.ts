@@ -1,40 +1,32 @@
 import { describe, expect, it } from 'vitest'
 import {
+  AcpCatalogAdapter,
   AcpCatalogRegistry,
   catalogRoute,
   fallbackCatalog,
   grokSeedCatalog,
   hostSelectionCurrent,
   hostServesProvider,
+  hostSessionModels,
   lastModelSelection,
   mountAcpCatalog,
   pickerSnapshot,
   seedSessionRoute,
   selectionFromCatalog,
 } from '../src/models.ts'
+import { createHostLikeLlm } from './host-llm.ts'
 
 const DEEPSEEK_DEFAULT = { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
 
-function fakeLlm() {
-  const registered: string[][] = []
-  return {
-    registered,
-    registerAdapter(providers: string[]) {
-      registered.push([...providers])
-      const handle = (() => {}) as { (): void; replace(next: string[]): void }
-      handle.replace = (next: string[]) => { registered.push([...next]) }
-      return handle
-    },
-  }
-}
-
 describe('host session.models / session.prompt gate (live box failure)', () => {
-  it('registers Grok 4.6/4.5 at apply, before any ACP child', () => {
-    const llm = fakeLlm()
+  it('seedDefaults puts grok on listProviders so routeServed and groups are Grok', async () => {
+    const llm = createHostLikeLlm()
     const registry = new AcpCatalogRegistry(llm)
     registry.seedDefaults()
 
-    expect(llm.registered[0]).toEqual(['claude', 'codex', 'cursor', 'grok'])
+    expect(llm.listProviders().map(entry => entry.id)).toEqual(['claude', 'codex', 'cursor', 'grok'])
+    expect(hostServesProvider(llm, 'grok')).toBe(true)
+
     const grok = registry.adapter.projected('grok')
     expect(grok?.models.map(model => model.id)).toEqual(['grok-4.6', 'grok-4.5'])
     expect(grok?.currentModel).toBe('grok-4.6')
@@ -48,23 +40,59 @@ describe('host session.models / session.prompt gate (live box failure)', () => {
       },
     }
     const seeded = seedSessionRoute(session, grok ?? grokSeedCatalog())
-    // Host setup calls selectionFor() here — picked must already be Grok.
     const picked = lastModelSelection(session.events)
     const current = hostSelectionCurrent({
       picked,
       defaultSelection: DEEPSEEK_DEFAULT,
     })
     const picker = pickerSnapshot(registry.adapter, current)
+    const host = await hostSessionModels(llm, current)
 
     expect(seeded).toEqual({ provider: 'grok', model: 'grok-4.6', reasoningEffort: 'high' })
-    expect(current.provider).toBe('grok')
-    expect(current.provider).not.toBe('deepseek-official')
-    expect(current.model).toBe('grok-4.6')
+    expect(current).toEqual({ provider: 'grok', model: 'grok-4.6', reasoningEffort: 'high' })
     expect(picker.routable).toBe(true)
-    expect(picker.groups.map(group => group.id)).toEqual(['claude', 'codex', 'cursor', 'grok'])
+    expect(host.routable).toBe(true)
+    expect(host.groups.map(group => group.id)).toEqual(['claude', 'codex', 'cursor', 'grok'])
+    expect(host.groups.find(group => group.id === 'grok')?.models.map(model => model.id))
+      .toEqual(['grok-4.6', 'grok-4.5'])
+    expect(host.groups.some(group => group.id === 'deepseek-official')).toBe(false)
     expect(picker.groups.find(group => group.id === 'grok')?.models.map(model => model.id))
       .toEqual(['grok-4.6', 'grok-4.5'])
-    expect(picker.groups.some(group => group.id === 'deepseek-official')).toBe(false)
+  })
+
+  it('fails seedDefaults if listProviders does not include grok', () => {
+    const errors: string[] = []
+    const registry = new AcpCatalogRegistry({
+      registerAdapter() {
+        const handle = (() => {}) as { (): void; replace(next: string[]): void }
+        handle.replace = () => {}
+        return handle
+      },
+      listProviders: () => [{ id: 'deepseek-official', name: 'DeepSeek' }],
+    }, { error: (message: unknown) => { errors.push(String(message)) } })
+    expect(() => registry.seedDefaults()).toThrow(/listProviders\(\) missing/)
+    expect(errors.join('\n')).toMatch(/listProviders\(\) missing claude, codex, cursor, grok/)
+  })
+
+  it('host prepareRoutes TypeError when providerRetryPolicy is missing', () => {
+    const llm = createHostLikeLlm()
+    const incomplete = {
+      providerInfo: (id: string) => ({ id, name: id }),
+    }
+    expect(() => llm.registerAdapter(['grok'], incomplete as never)).toThrow(TypeError)
+    expect(llm.listProviders()).toEqual([])
+  })
+
+  it('AcpCatalogAdapter implements the host LlmAdapter defaults', async () => {
+    const adapter = new AcpCatalogAdapter()
+    adapter.replace(grokSeedCatalog())
+    expect(adapter.providerRetryPolicy('grok')).toBeUndefined()
+    expect(adapter.imageRequestPricing('grok', 'grok-4.6')).toBeUndefined()
+    const prepared = await adapter.prepareCall('grok', 'grok-4.6')
+    expect(prepared.model).toMatchObject({ provider: 'grok', id: 'grok-4.6', name: 'Grok 4.6' })
+    await expect(async () => {
+      for await (const _chunk of prepared.stream({})) void _chunk
+    }).rejects.toThrow(/does not generate/)
   })
 
   it('reproduces the live miss: selectionFor before model/selection keeps DeepSeek current', () => {
@@ -122,19 +150,9 @@ describe('host session.models / session.prompt gate (live box failure)', () => {
     expect(JSON.stringify(catalogRoute(grokSeedCatalog(), mixed))).not.toMatch(/deepseek/i)
   })
 
-  it('mountAcpCatalog registers on the host llm from apply, not a swallowed constructor call', () => {
-    const registered: string[][] = []
+  it('mountAcpCatalog registers on the host llm from apply', async () => {
     const errors: string[] = []
-    const llm = {
-      registered,
-      listProviders: () => (registered.at(-1) ?? []).map(id => ({ id })),
-      registerAdapter(providers: string[]) {
-        registered.push([...providers])
-        const handle = (() => {}) as { (): void; replace(next: string[]): void }
-        handle.replace = (next: string[]) => { registered.push([...next]) }
-        return handle
-      },
-    }
+    const llm = createHostLikeLlm()
     const effects: Array<() => unknown> = []
     const catalog = mountAcpCatalog({
       llm,
@@ -146,20 +164,24 @@ describe('host session.models / session.prompt gate (live box failure)', () => {
     })
     expect(llm.listProviders().map(entry => entry.id)).toEqual(['claude', 'codex', 'cursor', 'grok'])
     expect(hostServesProvider(llm, 'grok')).toBe(true)
-    expect(catalog.adapter.projected('grok')?.models.map(model => model.id)).toEqual(['grok-4.6', 'grok-4.5'])
+    const host = await hostSessionModels(llm, { provider: 'grok', model: 'grok-4.6', reasoningEffort: 'high' })
+    expect(host.routable).toBe(true)
+    expect(host.groups.find(group => group.id === 'grok')?.models.map(model => model.id))
+      .toEqual(['grok-4.6', 'grok-4.5'])
     expect(errors).toEqual([])
     effects[0]?.()
     expect(catalog.adapter.advertisedProviders()).toEqual(['claude', 'codex', 'cursor', 'grok'])
   })
 
-  it('logs when registerAdapter throws instead of leaving grok off listProviders', () => {
+  it('logs and rethrows when registerAdapter throws', () => {
     const errors: string[] = []
     const registry = new AcpCatalogRegistry({
       registerAdapter() {
-        throw new Error('DUPLICATE_ADAPTER')
+        throw new TypeError('adapter.providerRetryPolicy is not a function')
       },
+      listProviders: () => [],
     }, { error: (message: unknown) => { errors.push(String(message)) } })
-    registry.seedDefaults()
-    expect(errors.join('\n')).toMatch(/catalog adapter not registered: DUPLICATE_ADAPTER/)
+    expect(() => registry.seedDefaults()).toThrow(TypeError)
+    expect(errors.join('\n')).toMatch(/catalog adapter not registered: adapter\.providerRetryPolicy is not a function/)
   })
 })

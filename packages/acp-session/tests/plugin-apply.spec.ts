@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createHostLikeLlm } from './host-llm.ts'
 
 vi.mock('../src/presets.ts', () => ({
   installPickerPresets: () => '/tmp/presets',
@@ -11,17 +12,8 @@ vi.mock('../src/factory.ts', () => ({
 describe('plugin apply registers the catalog on the host llm', () => {
   it('mounts grok/claude/codex/cursor before constructing the factory', async () => {
     const { apply } = await import('../src/plugin.ts')
-    const registered: string[][] = []
     const pluginConfigs: unknown[] = []
-    const llm = {
-      listProviders: () => (registered.at(-1) ?? []).map(id => ({ id, name: id })),
-      registerAdapter(providers: string[]) {
-        registered.push([...providers])
-        const handle = (() => {}) as { (): void; replace(next: string[]): void }
-        handle.replace = (next: string[]) => { registered.push([...next]) }
-        return handle
-      },
-    }
+    const llm = createHostLikeLlm()
     const ctx = {
       logger: { warn() {}, error() {}, info() {} },
       llm,
@@ -37,8 +29,7 @@ describe('plugin apply registers the catalog on the host llm', () => {
 
     apply(ctx as never)
 
-    expect(registered[0]).toEqual(['claude', 'codex', 'cursor', 'grok'])
-    expect(llm.listProviders().map(entry => entry.id)).toContain('grok')
+    expect(llm.listProviders().map(entry => entry.id)).toEqual(['claude', 'codex', 'cursor', 'grok'])
     expect(pluginConfigs).toHaveLength(1)
     expect(pluginConfigs[0]).toMatchObject({
       defaultProvider: 'claude',

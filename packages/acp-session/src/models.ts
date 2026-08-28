@@ -55,6 +55,7 @@ export interface CatalogLogger {
 export interface LlmRegistry {
   registerAdapter(providers: string[], adapter: AcpCatalogAdapter): AdapterRegistrationHandle
   listProviders?(): Array<{ id: string; name?: string }>
+  listModels?(provider: string): Promise<Array<{ provider: string; id: string; name: string; description?: string }>>
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -600,6 +601,19 @@ export class AcpCatalogAdapter {
     }
   }
 
+  /**
+   * Host `LlmRuntime.prepareRoutes` calls this and defaults with `??`.
+   * A missing method is a TypeError; the effect fails and grok never
+   * lands in `listProviders()`.
+   */
+  providerRetryPolicy(_provider: string): undefined {
+    return undefined
+  }
+
+  imageRequestPricing(_provider: string, _model: string): undefined {
+    return undefined
+  }
+
   listModels(provider: string): Promise<Array<{
     provider: string
     id: string
@@ -615,7 +629,7 @@ export class AcpCatalogAdapter {
     })))
   }
 
-  resolveModel(provider: string, model: string): Promise<{
+  resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<{
     provider: string
     id: string
     name: string
@@ -646,7 +660,17 @@ export class AcpCatalogAdapter {
     })
   }
 
-  async *stream(): AsyncIterable<never> {
+  async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<{
+    model: Awaited<ReturnType<AcpCatalogAdapter['resolveModel']>>
+    stream: (options?: unknown) => AsyncIterable<never>
+  }> {
+    return {
+      model: await this.resolveModel(provider, model, signal),
+      stream: options => this.stream(options),
+    }
+  }
+
+  async *stream(_options?: unknown): AsyncIterable<never> {
     throw new Error(
       'lumine-acp-session: catalog adapter does not generate; the official ACP child owns the turn',
     )
@@ -717,12 +741,24 @@ export class AcpCatalogRegistry {
         this.handle.replace(providers)
       }
     } catch (error: unknown) {
-      this.logger?.error?.(
-        `lumine-acp-session: catalog adapter not registered: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      )
+      const text = `lumine-acp-session: catalog adapter not registered: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+      this.logger?.error?.(text)
+      throw error instanceof Error ? error : new Error(text)
     }
+    // registerAdapter is ctx.effect: a failed effect can still return a handle
+    // with no routes. routeServed reads listProviders(), not the handle.
+    this.assertHostServes(providers)
+  }
+
+  private assertHostServes(providers: readonly string[]): void {
+    const served = new Set((this.llm?.listProviders?.() ?? []).map(entry => entry.id))
+    const missing = providers.filter(provider => !served.has(provider))
+    if (missing.length === 0) return
+    const text = `lumine-acp-session: ctx.llm.listProviders() missing ${missing.join(', ')} after registerAdapter`
+    this.logger?.error?.(text)
+    throw new Error(text)
   }
 }
 
@@ -791,5 +827,39 @@ export function pickerSnapshot(
         models: catalog?.models ?? [],
       }
     }).filter(group => group.models.length > 0),
+  }
+}
+
+/** Host `session.models` fold: listProviders + listModels + current. */
+export async function hostSessionModels(
+  llm: {
+    listProviders(): Array<{ id: string; name?: string }>
+    listModels(provider: string): Promise<Array<{ provider: string; id: string; name: string; description?: string }>>
+  },
+  current: HostModelSelection,
+): Promise<{
+  current: HostModelSelection
+  routable: boolean
+  groups: Array<{ id: string; name: string; models: Array<{ id: string; name: string; description?: string }> }>
+}> {
+  const providers = llm.listProviders()
+  const groups = []
+  for (const provider of providers) {
+    const models = await llm.listModels(provider.id)
+    if (models.length === 0) continue
+    groups.push({
+      id: provider.id,
+      name: provider.name ?? provider.id,
+      models: models.map(model => ({
+        id: model.id,
+        name: model.name,
+        ...model.description === undefined ? {} : { description: model.description },
+      })),
+    })
+  }
+  return {
+    current,
+    routable: providers.some(entry => entry.id === current.provider),
+    groups,
   }
 }

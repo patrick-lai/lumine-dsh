@@ -162,7 +162,9 @@ export class AcpSessionAgent implements Agent {
   }
 
   private adoptHostDefault(selection: HostModelSelection): void {
-    const defaults = (this.loopCtx.agentDefaultModel ?? this.loopCtx.get('agentDefaultModel')) as {
+    // Cordis throws `cannot get property "agentDefaultModel" without inject`
+    // on property access when the factory did not inject that service.
+    const defaults = this.loopCtx.get('agentDefaultModel') as {
       currentSelection?: () => HostModelSelection
       saveSelection?: (next: HostModelSelection) => Promise<void>
     } | undefined

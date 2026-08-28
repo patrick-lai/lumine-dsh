@@ -50,6 +50,7 @@ export {
   grokSeedCatalog,
   hostSelectionCurrent,
   hostServesProvider,
+  hostSessionModels,
   lastModelSelection,
   mountAcpCatalog,
   pickerSnapshot,

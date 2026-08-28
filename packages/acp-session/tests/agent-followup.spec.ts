@@ -44,6 +44,8 @@ vi.mock('@deepseek-ai/dsh-scope', () => ({
   }),
 }))
 
+import { createHostLikeLlm } from './host-llm.ts'
+
 const fakeChild = fileURLToPath(new URL('./fixtures/fake-acp-child.mjs', import.meta.url))
 
 function isJsonSafe(value: unknown): boolean {
@@ -76,8 +78,8 @@ function createSession() {
   }
 }
 
-function createCtx(errors: string[], served: string[] = []) {
-  return {
+function createCtx(errors: string[], llm: ReturnType<typeof createHostLikeLlm> | { listProviders: () => Array<{ id: string }> } = createHostLikeLlm()) {
+  const ctx = {
     logger: {
       warn: () => {},
       info: () => {},
@@ -85,16 +87,18 @@ function createCtx(errors: string[], served: string[] = []) {
     },
     agents: { withInitiator: (_agent: unknown, operation: () => unknown) => operation() },
     on: () => () => {},
-    get: () => undefined,
-    llm: {
-      listProviders: () => served.map(id => ({ id, name: id })),
-      registerAdapter() {
-        const handle = (() => {}) as { (): void; replace(next: string[]): void }
-        handle.replace = () => {}
-        return handle
-      },
+    llm,
+    get(name: string) {
+      if (name === 'llm') return ctx.llm
+      return undefined
     },
   }
+  Object.defineProperty(ctx, 'agentDefaultModel', {
+    get() {
+      throw new Error('cannot get property "agentDefaultModel" without inject')
+    },
+  })
+  return ctx
 }
 
 describe('AcpSessionAgent first followup', () => {
@@ -113,16 +117,11 @@ describe('AcpSessionAgent first followup', () => {
     const { AcpCatalogRegistry, lastModelSelection } = await import('../src/models.ts')
     const errors: string[] = []
     const session = createSession()
-    const catalog = new AcpCatalogRegistry({
-      registerAdapter() {
-        const handle = (() => {}) as { (): void; replace(next: string[]): void }
-        handle.replace = () => {}
-        return handle
-      },
-    })
+    const llm = createHostLikeLlm()
+    const catalog = new AcpCatalogRegistry(llm)
     catalog.seedDefaults()
     const agent = new AcpSessionAgent(
-      createCtx(errors) as never,
+      createCtx(errors, llm) as never,
       'session-followup-1' as never,
       { provider: 'grok' },
       session as never,
@@ -165,16 +164,14 @@ describe('AcpSessionAgent first followup', () => {
     const { AcpCatalogRegistry, hostSelectionCurrent } = await import('../src/models.ts')
     const errors: string[] = []
     const session = createSession()
-    const catalog = new AcpCatalogRegistry({
-      registerAdapter() {
-        const handle = (() => {}) as { (): void; replace(next: string[]): void }
-        handle.replace = () => {}
-        return handle
-      },
-    })
+    const llm = createHostLikeLlm()
+    const catalog = new AcpCatalogRegistry(llm)
     catalog.seedDefaults()
+    const unserved = {
+      listProviders: () => [{ id: 'deepseek-official', name: 'DeepSeek' }],
+    }
     const agent = new AcpSessionAgent(
-      createCtx(errors, ['deepseek-official']) as never,
+      createCtx(errors, unserved) as never,
       'session-followup-1' as never,
       { provider: 'grok', model: 'deepseek-v4-flash' },
       session as never,
@@ -228,18 +225,11 @@ describe('AcpSessionAgent first followup', () => {
     const { AcpCatalogRegistry, hostSelectionCurrent } = await import('../src/models.ts')
     const errors: string[] = []
     const session = createSession()
-    const served = ['claude', 'codex', 'cursor', 'grok']
-    const catalog = new AcpCatalogRegistry({
-      listProviders: () => served.map(id => ({ id })),
-      registerAdapter() {
-        const handle = (() => {}) as { (): void; replace(next: string[]): void }
-        handle.replace = () => {}
-        return handle
-      },
-    })
+    const llm = createHostLikeLlm()
+    const catalog = new AcpCatalogRegistry(llm)
     catalog.seedDefaults()
     const agent = new AcpSessionAgent(
-      createCtx(errors, served) as never,
+      createCtx(errors, llm) as never,
       'session-followup-1' as never,
       { provider: 'grok', model: 'deepseek-v4-flash' },
       session as never,

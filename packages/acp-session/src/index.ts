@@ -31,6 +31,7 @@ export const fallbackCatalog = plugin.fallbackCatalog
 export const grokSeedCatalog = plugin.grokSeedCatalog
 export const hostSelectionCurrent = plugin.hostSelectionCurrent
 export const hostServesProvider = plugin.hostServesProvider
+export const hostSessionModels = plugin.hostSessionModels
 export const lastModelSelection = plugin.lastModelSelection
 export const mountAcpCatalog = plugin.mountAcpCatalog
 export const pickerSnapshot = plugin.pickerSnapshot

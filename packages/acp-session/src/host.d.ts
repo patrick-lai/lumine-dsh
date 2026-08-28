@@ -28,10 +28,8 @@ declare module '@deepseek-ai/cordis' {
         reasoningEffort?: string
       }>
     }
-    agentDefaultModel?: {
-      currentSelection(): { provider: string; model: string; reasoningEffort?: string }
-      saveSelection(next: { provider: string; model: string; reasoningEffort?: string }): Promise<void>
-    }
+    // Not an injected factory dep. Read only via get('agentDefaultModel') —
+    // property access throws `cannot get property "agentDefaultModel" without inject`.
     approval?: import('@deepseek-ai/dsh-user-approval').ApprovalService
     agent?: import('@deepseek-ai/dsh-agent').Agent
     get<T = unknown>(name: string): T | undefined
