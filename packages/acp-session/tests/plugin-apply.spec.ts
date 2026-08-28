@@ -35,10 +35,23 @@ describe('plugin apply registers the catalog on the host llm', () => {
       defaultProvider: 'claude',
       permission: 'yolo',
     })
-    expect((pluginConfigs[0] as { catalog?: { adapter?: { projected: (id: string) => unknown } } }).catalog
-      ?.adapter?.projected('grok')).toMatchObject({
+    const catalog = (pluginConfigs[0] as { catalog?: { adapter?: { projected: (id: string) => { provider?: string; currentModel?: string } | undefined } } }).catalog
+      ?.adapter
+    expect(catalog?.projected('grok')).toMatchObject({
       provider: 'grok',
       currentModel: 'grok-4.6',
+    })
+    expect(catalog?.projected('claude')).toMatchObject({
+      provider: 'claude',
+      currentModel: 'default',
+    })
+    expect(catalog?.projected('cursor')).toMatchObject({
+      provider: 'cursor',
+      currentModel: 'composer-2',
+    })
+    expect(catalog?.projected('codex')).toMatchObject({
+      provider: 'codex',
+      currentModel: 'codex',
     })
   })
 })

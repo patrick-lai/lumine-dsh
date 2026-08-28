@@ -14,11 +14,13 @@ import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { SessionPreparation } from '@deepseek-ai/dsh-session'
 import { AcpSessionAgent } from './agent.ts'
 import type { ResolvedConfig } from './config.ts'
+import type { LastModelsStore } from './last-models.ts'
 import { AcpCatalogRegistry, mountAcpCatalog } from './models.ts'
 import { resolveProviderId, type ProviderId } from './providers.ts'
 
 export interface FactoryOptions extends ResolvedConfig {
   catalog?: AcpCatalogRegistry
+  lastModels?: LastModelsStore
 }
 
 // @deepseek-ai/cordis exports `const enum FiberState` (PENDING=0 … UNLOADING=5).
@@ -127,6 +129,7 @@ export class LumineAcpFactory extends Service implements AgentFactory {
   private readonly ownership: FactoryOwnership
   private readonly runtime: { ctx: Context }
   private readonly catalog: AcpCatalogRegistry
+  private readonly lastModels: LastModelsStore | undefined
 
   constructor(ctx: Context, options: FactoryOptions) {
     super(ctx, 'lumineAcpSession')
@@ -134,6 +137,7 @@ export class LumineAcpFactory extends Service implements AgentFactory {
       defaultProvider: options.defaultProvider,
       permission: options.permission,
       providers: options.providers,
+      worktrees: options.worktrees,
     }
     this.ownership = new FactoryOwnership(ctx.fiber)
     this.runtime = { ctx }
@@ -141,11 +145,15 @@ export class LumineAcpFactory extends Service implements AgentFactory {
     // seeding only from this constructor (fiber still LOADING) left grok
     // off listProviders() and poisoned the second prompt via request/header.
     this.catalog = options.catalog ?? mountAcpCatalog(ctx)
+    this.lastModels = options.lastModels
     ctx.effect(() => () => this.ownership.dispose(), 'lumineAcpSession.transactions()')
     ctx.effect(() => ctx.agents.setFactory(this), 'lumineAcpSession.setFactory()')
   }
 
   providerFor(session: Session, options: AgentOptions | undefined): ProviderId {
+    // Preset (Claude Code / Codex / Cursor / Grok Build) wins over
+    // agentOptions.provider, which session.create fills from the host-wide
+    // agent-default-model (last session's product).
     return resolveProviderId({
       preset: session.header.agentPreset,
       provider: options?.provider,
@@ -237,6 +245,7 @@ export class LumineAcpFactory extends Service implements AgentFactory {
         provider,
         this.resolved,
         this.catalog,
+        this.lastModels,
       )
       machineReady.resolve()
       assertLive()

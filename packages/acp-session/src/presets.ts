@@ -7,7 +7,7 @@ const USER_PRESET_DIR = '.agent-presets'
 
 export const PRESET_IDS = ['claude-code', 'codex', 'cursor', 'grok-build'] as const
 
-function resolveDshHome(env: NodeJS.ProcessEnv = process.env): string {
+export function resolveDshHome(env: NodeJS.ProcessEnv = process.env): string {
   const fromEnv = env.DSH_HOME?.trim()
   if (fromEnv) {
     if (fromEnv === '~') return homedir()

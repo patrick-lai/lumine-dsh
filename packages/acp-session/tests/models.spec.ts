@@ -129,6 +129,18 @@ describe('ACP config-option → session.models projection', () => {
     expect(catalog.currentModel).toBe('grok-4.6')
   })
 
+  it('seeds Claude Code from the live ACP 0.70 catalog, not Grok or DeepSeek', () => {
+    expect(fallbackCatalog('claude').models.map(model => model.id)).toEqual([
+      'default',
+      'opus[1m]',
+      'claude-fable-5[1m]',
+      'sonnet',
+      'haiku',
+    ])
+    expect(fallbackCatalog('claude').currentModel).toBe('default')
+    expect(JSON.stringify(fallbackCatalog('claude'))).not.toMatch(/grok-4|deepseek/i)
+  })
+
   it('reads legacy session/new models when configOptions is empty', () => {
     const catalog = projectAcpModels('claude', {
       models: { currentModelId: 'sonnet', availableModels: [{ modelId: 'sonnet', name: 'Sonnet' }, { modelId: 'opus', name: 'Opus' }] },

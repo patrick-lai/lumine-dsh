@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Fake official ACP child for CI. Speaks JSON-RPC 2.0 NDJSON on stdio.
- * Handshake matches live Grok Build 1.0.5 gold (not an invented catalog).
+ * Default handshake matches live Grok Build 1.0.5 gold. Set
+ * FAKE_ACP_PROVIDER=claude|codex|cursor|grok for the other products.
  * No live Claude/Codex/Cursor/Grok CLIs required.
  */
 import readline from 'node:readline'
@@ -11,6 +12,7 @@ const failMissing = process.env.FAKE_ACP_CRASH === '1'
 const noConfigOptions = process.env.FAKE_ACP_NO_CONFIG_OPTIONS === '1'
 const rejectSetConfig = process.env.FAKE_ACP_NO_SET_CONFIG === '1'
 const forbidAuth = process.env.FAKE_ACP_FORBID_AUTH === '1'
+const provider = (process.env.FAKE_ACP_PROVIDER || 'grok').toLowerCase()
 
 if (failMissing) {
   console.error('install Claude Code and log in')
@@ -19,10 +21,16 @@ if (failMissing) {
 
 let sessionId = 'acp-session-1'
 const pending = new Map()
-let currentModel = 'grok-4.6'
-let currentEffort = 'high'
+let currentModel = provider === 'claude'
+  ? 'default'
+  : provider === 'cursor'
+    ? 'composer-2'
+    : provider === 'codex'
+      ? 'codex'
+      : 'grok-4.6'
+let currentEffort = provider === 'claude' ? 'default' : 'high'
 
-const availableModels = [
+const grokModels = [
   {
     modelId: 'grok-4.6',
     name: 'Grok 4.6',
@@ -44,6 +52,8 @@ const availableModels = [
   },
 ]
 
+const availableModels = provider === 'grok' ? grokModels : []
+
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`)
 }
@@ -60,6 +70,67 @@ function modelState() {
 }
 
 function sessionConfigOptions() {
+  if (provider === 'claude') {
+    return [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: currentModel,
+        options: [
+          { value: 'default', name: 'Default (recommended)' },
+          { value: 'opus[1m]', name: 'Opus (1M context)' },
+          { value: 'claude-fable-5[1m]', name: 'Fable' },
+          { value: 'sonnet', name: 'Sonnet' },
+          { value: 'haiku', name: 'Haiku' },
+        ],
+      },
+      {
+        id: 'effort',
+        name: 'Effort',
+        category: 'thought_level',
+        type: 'select',
+        currentValue: currentEffort,
+        options: [
+          { value: 'default', name: 'Default' },
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
+          { value: 'high', name: 'High' },
+        ],
+      },
+    ]
+  }
+  if (provider === 'cursor') {
+    return [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: currentModel,
+        options: [
+          { value: 'composer-2', name: 'Composer 2' },
+          { value: 'gpt-5', name: 'GPT-5' },
+        ],
+      },
+    ]
+  }
+  if (provider === 'codex') {
+    return [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: currentModel,
+        options: [
+          { value: 'codex', name: 'Codex' },
+          { value: 'gpt-5.2', name: 'GPT-5.2' },
+        ],
+      },
+    ]
+  }
   return [
     { id: 'grok-4.6', category: 'model', label: 'Grok 4.6', selected: currentModel === 'grok-4.6' },
     { id: 'grok-4.5', category: 'model', label: 'Grok 4.5', selected: currentModel === 'grok-4.5' },
@@ -71,6 +142,9 @@ function sessionConfigOptions() {
 }
 
 function sessionCatalog() {
+  if (provider !== 'grok') {
+    return noConfigOptions ? { sessionId } : { sessionId, configOptions: sessionConfigOptions() }
+  }
   return {
     models: modelState(),
     ...noConfigOptions ? {} : {
@@ -94,20 +168,23 @@ rl.on('line', async (line) => {
   }
 
   if (msg.method === 'initialize') {
+    const grokAuth = {
+      authMethods: [
+        { id: 'cached_token', name: 'Cached token' },
+        { id: 'grok.com', name: 'grok.com' },
+      ],
+      _meta: {
+        defaultAuthMethodId: 'cached_token',
+        modelState: modelState(),
+      },
+      modelState: modelState(),
+    }
     send({
       jsonrpc: '2.0',
       id: msg.id,
       result: {
         protocolVersion: 1,
-        authMethods: [
-          { id: 'cached_token', name: 'Cached token' },
-          { id: 'grok.com', name: 'grok.com' },
-        ],
-        _meta: {
-          defaultAuthMethodId: 'cached_token',
-          modelState: modelState(),
-        },
-        modelState: modelState(),
+        ...(provider === 'grok' ? grokAuth : { authMethods: [] }),
       },
     })
     return
@@ -156,13 +233,20 @@ rl.on('line', async (line) => {
     }
     const configId = msg.params?.configId
     const value = msg.params?.value
-    const modelIds = new Set(availableModels.map(model => model.modelId))
-    const modeIds = new Set(['xhigh', 'high', 'medium', 'low'])
+    const modelIds = new Set(
+      availableModels.map(model => model.modelId).concat(
+        provider === 'claude' ? ['default', 'opus[1m]', 'claude-fable-5[1m]', 'sonnet', 'haiku']
+          : provider === 'cursor' ? ['composer-2', 'gpt-5']
+            : provider === 'codex' ? ['codex', 'gpt-5.2']
+              : [],
+      ),
+    )
+    const modeIds = new Set(['xhigh', 'high', 'medium', 'low', 'default'])
     if (modelIds.has(configId) || (configId === 'model' && modelIds.has(value))) {
       currentModel = modelIds.has(configId) ? configId : value
     }
-    if (modeIds.has(configId) || (configId === 'mode' && modeIds.has(value))) {
-      currentEffort = modeIds.has(configId) ? configId : value
+    if (modeIds.has(configId) || (configId === 'mode' && modeIds.has(value)) || configId === 'effort') {
+      currentEffort = modeIds.has(configId) && configId !== 'effort' ? configId : value
     }
     const catalog = sessionCatalog()
     notify('session/update', {
@@ -194,12 +278,13 @@ rl.on('line', async (line) => {
       .filter(block => block?.type === 'text' && typeof block.text === 'string')
       .map(block => block.text)
       .join('\n')
-    if (/\bping\b/i.test(promptText) || /\bpong\b/i.test(promptText)) {
+    if (/\bpong\b/i.test(promptText) || /\bping\b/i.test(promptText)) {
+      const word = /\bpong\b/i.test(promptText) ? 'pong' : 'ping'
       notify('session/update', {
         sessionId: sid,
         update: {
           sessionUpdate: 'agent_message_chunk',
-          content: { type: 'text', text: 'pong' },
+          content: { type: 'text', text: word },
         },
       })
       send({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } })

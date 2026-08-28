@@ -330,6 +330,15 @@ const GROK_MODE_EFFORTS = [
   { id: 'low', name: 'Low' },
 ] as const
 
+const CLAUDE_EFFORTS = [
+  { id: 'default', name: 'Default' },
+  { id: 'low', name: 'Low' },
+  { id: 'medium', name: 'Medium' },
+  { id: 'high', name: 'High' },
+  { id: 'xhigh', name: 'Xhigh' },
+  { id: 'max', name: 'Max' },
+] as const
+
 /**
  * Live Grok Build 1.0.5 catalog (initialize.modelState + session/new).
  * Seed this at plugin apply so `session.models` is Grok 4.6/4.5 before the
@@ -370,8 +379,53 @@ export function grokSeedCatalog(): ProjectedCatalog {
   }
 }
 
+/**
+ * Live Claude Code ACP 0.70 catalog (`session/new` configOptions).
+ * `currentValue` is the ACP `default` alias, not a DeepSeek or Grok id.
+ */
+export function claudeSeedCatalog(): ProjectedCatalog {
+  return {
+    provider: 'claude',
+    providerName: PROVIDER_LABEL.claude,
+    models: [
+      { id: 'default', name: 'Default (recommended)', description: 'Opus (1M context)' },
+      { id: 'opus[1m]', name: 'Opus (1M context)', description: 'Opus 5 with 1M context' },
+      { id: 'claude-fable-5[1m]', name: 'Fable', description: 'Fable 5' },
+      { id: 'sonnet', name: 'Sonnet', description: 'Sonnet 5' },
+      { id: 'haiku', name: 'Haiku', description: 'Haiku 4.5' },
+    ],
+    currentModel: 'default',
+    modelConfigId: 'model',
+    modelSetStyle: 'select',
+    reasoning: {
+      configId: 'effort',
+      setStyle: 'select',
+      efforts: CLAUDE_EFFORTS.map(effort => ({ ...effort })),
+      current: 'default',
+      defaultEffort: 'default',
+    },
+  }
+}
+
+/** Typical ACP v1 `configOptions` select (`id: "model"`) used by Cursor. */
+export function cursorSeedCatalog(): ProjectedCatalog {
+  return {
+    provider: 'cursor',
+    providerName: PROVIDER_LABEL.cursor,
+    models: [
+      { id: 'composer-2', name: 'Composer 2' },
+      { id: 'gpt-5', name: 'GPT-5' },
+    ],
+    currentModel: 'composer-2',
+    modelConfigId: 'model',
+    modelSetStyle: 'select',
+  }
+}
+
 export function fallbackCatalog(provider: ProviderId): ProjectedCatalog {
   if (provider === 'grok') return grokSeedCatalog()
+  if (provider === 'claude') return claudeSeedCatalog()
+  if (provider === 'cursor') return cursorSeedCatalog()
   return {
     provider,
     providerName: PROVIDER_LABEL[provider],
@@ -387,6 +441,29 @@ export function selectionFromCatalog(catalog: ProjectedCatalog): HostModelSelect
     provider: catalog.provider,
     model: catalog.currentModel,
     ...catalog.reasoning?.current === undefined ? {} : { reasoningEffort: catalog.reasoning.current },
+  }
+}
+
+/**
+ * Last-used pick for this ACP product when it is still advertised; otherwise
+ * the catalog default. Effort is kept only when that model still lists it.
+ */
+export function selectionForAgent(
+  catalog: ProjectedCatalog,
+  remembered?: { model: string; reasoningEffort?: string },
+): HostModelSelection {
+  const known = remembered !== undefined && catalog.models.some(model => model.id === remembered.model)
+  if (!known || remembered === undefined) return selectionFromCatalog(catalog)
+  const entry = catalog.models.find(model => model.id === remembered.model)
+  const efforts = entry?.reasoning?.efforts ?? catalog.reasoning?.efforts ?? []
+  const effort = remembered.reasoningEffort !== undefined
+    && efforts.some(item => item.id === remembered.reasoningEffort)
+    ? remembered.reasoningEffort
+    : entry?.reasoning?.defaultEffort ?? catalog.reasoning?.current ?? catalog.reasoning?.defaultEffort
+  return {
+    provider: catalog.provider,
+    model: remembered.model,
+    ...effort === undefined ? {} : { reasoningEffort: effort },
   }
 }
 
@@ -420,10 +497,15 @@ export function hostServesProvider(
 }
 
 /**
- * Host `selectionFor(agent).current` fold: picked (from `model/selection`
- * pending at first `selectionFor` call) OR `request/header` OR
- * `agent-default-model`. `model/selection` appended *after* that first call
- * does not move `current`.
+ * Host `selectionFor(agent).current` fold (dsh-host-apiproxy):
+ * 1. in-process `selectModel` pick
+ * 2. `session.requestHeader()?.config` (from turn-enclosed `request/header`)
+ * 3. global `agent-default-model` (DeepSeek, or last `saveSelection`)
+ *
+ * DSH does **not** read a `model/selection` event. That type is also absent
+ * from `KNOWN_SESSION_EVENT_TYPES`, so appending it poisons resume. This
+ * plugin wraps `requestHeader()` so step 2 is the ACP product before the
+ * first prompt writes a real header.
  */
 export function hostSelectionCurrent(input: {
   picked?: HostModelSelection
@@ -695,8 +777,9 @@ export class AcpCatalogRegistry {
 
   /**
    * Advertise every ACP product with a seed catalog. Grok uses the live 1.0.5
-   * gold (grok-4.6 / grok-4.5). Other products use a labeled placeholder until
-   * that child's initialize + session/new replaces it.
+   * gold (grok-4.6 / grok-4.5). Claude Code uses the live ACP 0.70 select
+   * (`default` / opus / sonnet / haiku). Other products use a labeled
+   * placeholder until that child's initialize + session/new replaces it.
    *
    * Call from plugin `apply` via {@link mountAcpCatalog} — `registerAdapter`
    * uses `ctx.effect`, and the factory constructor fiber is still LOADING.
@@ -791,22 +874,85 @@ export function mountAcpCatalog(
 }
 
 /**
- * Persist the session's current picker row. Must run *before* host
- * `setup` → `selectionFor()` so `picked` is this product, not
- * `deepseek-official` / `deepseek-v4-flash`.
+ * Host `selectionFor().current` reads `session.requestHeader()?.config` when
+ * no `selectModel` pick exists. `request/header` itself is turn-enclosed, so
+ * wrap the fold: until a real header is logged, report this session's ACP
+ * product instead of the host-wide `agent-default-model` (often grok).
+ */
+export function adoptPickerCurrent(
+  session: { requestHeader?: () => unknown },
+  selection: () => HostModelSelection,
+): void {
+  const original = typeof session.requestHeader === 'function'
+    ? session.requestHeader.bind(session)
+    : (): undefined => undefined
+  const wrapped = (): unknown => {
+    const logged = asRecord(original())
+    const config = asRecord(logged?.config)
+    if (typeof config?.provider === 'string' && config.provider
+      && typeof config.model === 'string' && config.model) {
+      return logged
+    }
+    const next = selection()
+    return {
+      config: {
+        provider: next.provider,
+        model: next.model,
+        ...next.reasoningEffort === undefined ? {} : { reasoningEffort: next.reasoningEffort },
+      },
+    }
+  }
+  try {
+    Object.defineProperty(session, 'requestHeader', { configurable: true, value: wrapped })
+  } catch {
+    (session as { requestHeader: () => unknown }).requestHeader = wrapped
+  }
+}
+
+/**
+ * Point the host picker at this product before setup's `selectionFor()`.
+ * Does **not** append `model/selection` — that type is unknown to DSH
+ * persistence and is not the host current-selection fold.
  */
 export function seedSessionRoute(
-  session: { events: ReadonlyArray<{ type: string; data: unknown }>; append(type: string, data: unknown): unknown },
+  session: { requestHeader?: () => unknown },
   catalog: ProjectedCatalog,
 ): HostModelSelection {
   const next = selectionFromCatalog(catalog)
-  if (!selectionEquals(lastModelSelection(session.events), next)) {
-    session.append('model/selection', next)
-  }
+  adoptPickerCurrent(session, () => next)
   return next
 }
 
-/** Test helper: what the web picker would show after our projection. */
+/**
+ * Drop every provider group the current ACP agent cannot serve.
+ * Host `session.models` lists the whole llm registry (DeepSeek + every ACP
+ * product we seed). The composer picker must not.
+ */
+export function constrainSessionCatalog<
+  G extends { id: string },
+  F extends { id: string } = { id: string },
+>(
+  catalog: { groups: readonly G[]; failures?: readonly F[] },
+  provider: string,
+): { groups: G[]; failures: F[] } {
+  return {
+    groups: catalog.groups.filter(group => group.id === provider),
+    failures: (catalog.failures ?? []).filter(failure => failure.id === provider),
+  }
+}
+
+/** Same-provider catalog membership. Cross-product picks are never selectable. */
+export function selectionSupportedByAgent(
+  agentProvider: string,
+  selection: { provider: string; model?: string },
+  catalog?: { models: ReadonlyArray<{ id: string }> },
+): boolean {
+  if (selection.provider !== agentProvider) return false
+  if (selection.model === undefined || catalog === undefined || catalog.models.length === 0) return true
+  return catalog.models.some(model => model.id === selection.model)
+}
+
+/** Test helper: what the web picker would show after our per-agent constraint. */
 export function pickerSnapshot(
   adapter: AcpCatalogAdapter,
   current: HostModelSelection,
@@ -816,21 +962,26 @@ export function pickerSnapshot(
   groups: Array<{ id: string; name: string; models: CatalogModel[] }>
 } {
   const providers = adapter.advertisedProviders()
+  const unconstrained = providers.map((id) => {
+    const catalog = adapter.projected(id)
+    return {
+      id,
+      name: catalog?.providerName ?? PROVIDER_LABEL[id],
+      models: catalog?.models ?? [],
+    }
+  }).filter(group => group.models.length > 0)
+  const { groups } = constrainSessionCatalog({ groups: unconstrained }, current.provider)
   return {
     current,
-    routable: providers.includes(current.provider as ProviderId),
-    groups: providers.map((id) => {
-      const catalog = adapter.projected(id)
-      return {
-        id,
-        name: catalog?.providerName ?? PROVIDER_LABEL[id],
-        models: catalog?.models ?? [],
-      }
-    }).filter(group => group.models.length > 0),
+    routable: providers.includes(current.provider as ProviderId) && groups.length > 0,
+    groups,
   }
 }
 
-/** Host `session.models` fold: listProviders + listModels + current. */
+/**
+ * Unfiltered host `session.models` fold: every registered route.
+ * The live composer picker runs {@link constrainSessionCatalog} on this.
+ */
 export async function hostSessionModels(
   llm: {
     listProviders(): Array<{ id: string; name?: string }>

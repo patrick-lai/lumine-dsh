@@ -60,12 +60,12 @@ function isJsonSafe(value: unknown): boolean {
   return false
 }
 
-function createSession() {
+function createSession(preset = 'grok-build') {
   const events: Array<{ type: string; data: unknown; seq: number }> = []
   let seq = 0
-  return {
+  const session = {
     id: 'session-followup-1',
-    header: { cwd: process.cwd(), agentPreset: 'grok-build' },
+    header: { cwd: process.cwd(), agentPreset: preset },
     events,
     append(type: string, data: unknown) {
       if (!isJsonSafe(data)) {
@@ -75,7 +75,17 @@ function createSession() {
       events.push(event)
       return event
     },
+    requestHeader() {
+      for (let index = events.length - 1; index >= 0; index -= 1) {
+        const event = events[index]
+        if (event?.type !== 'request/header') continue
+        const data = event.data as { header?: { config?: { provider: string; model: string } } }
+        return data.header
+      }
+      return undefined
+    },
   }
+  return session
 }
 
 function createCtx(errors: string[], llm: ReturnType<typeof createHostLikeLlm> | { listProviders: () => Array<{ id: string }> } = createHostLikeLlm()) {
@@ -136,8 +146,8 @@ describe('AcpSessionAgent first followup', () => {
       catalog,
     )
 
-    expect(lastModelSelection(session.events)?.provider).toBe('grok')
-    expect(lastModelSelection(session.events)?.model).toBe('grok-4.6')
+    expect(session.requestHeader()?.config).toMatchObject({ provider: 'grok', model: 'grok-4.6' })
+    expect(lastModelSelection(session.events)).toBeUndefined()
 
     agent.followup({
       id: 'u1',

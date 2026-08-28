@@ -23,3 +23,5 @@
       config:
         permission: yolo
         defaultProvider: claude
+        worktrees:
+          mode: auto

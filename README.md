@@ -61,12 +61,13 @@ Community pattern: `dsh-loop-dock`. v1 is an ACP-only profile (DeepSeek-native s
 
 Creation copies DSH's transaction: `sessions.prepare` → construct Agent → `setup(agentCtx)` → start the official ACP child → `sessions.enter` → disposer → `sessions.announce` → `agents.enter` → `agents.announce` → `agent/session-start`.
 
-The web composer picker reads host-wide `session.models` (`ctx.llm.listProviders` / `listModels`) plus `selectionFor(agent).current`. That current is `picked` (from `model/selection` pending at the first `selectionFor` call) or `request/header` or settings `agent-default-model` (DeepSeek by default). Host `setup` calls `selectionFor` *before* the ACP child is spawned, and `request/header` is turn-enclosed, so this plugin:
+The web composer picker reads host-wide `session.models` (`ctx.llm.listProviders` / `listModels`) plus `selectionFor(agent).current`. That current is an in-process `selectModel` pick, else `session.requestHeader()?.config`, else settings `agent-default-model` (DeepSeek, or whichever product last called `saveSelection` — often grok-4.6). Host `session.create` also stuffs that global default into `agentOptions.provider`. The host catalog is every registered route, so without a gate the composer would list DeepSeek plus Claude/Codex/Cursor/Grok and grey out (or `model-unavailable`) everything the selected ACP child cannot serve. We wrap `session.models` / `session.selectModel` so the rows are only that session's product (Claude Code → `default` / opus / sonnet / haiku, Grok → grok-4.6 / grok-4.5, …); a foreign pick is `model-unavailable`. Swapping the top-left agent applies that product's last-used model (durable per product in `$DSH_HOME/.lumine-acp-session/last-models.json`) or its catalog default — host `agent-default-model` is one global slot and cannot remember Claude and Grok separately. Host `setup` calls `selectionFor` *before* the ACP child is spawned, and `request/header` is turn-enclosed, so this plugin:
 
-1. Registers a **catalog-only** adapter from plugin `apply` for `claude` / `codex` / `cursor` / `grok` (Grok seeded with live 1.0.5 gold: grok-4.6 / grok-4.5). The adapter implements the host `LlmAdapter` surface `registerAdapter` actually calls (`providerRetryPolicy` → `undefined`, `imageRequestPricing` → `undefined`, `prepareCall`). `stream()` throws; generation stays on the official child. After seed, `listProviders()` must contain those ids or we `logger.error` and throw — a missing `providerRetryPolicy` was a TypeError that we used to swallow, leaving `groups` DeepSeek-only and `routable: false`.
-2. Appends `model/selection` in the Agent constructor so `picked` is already grok-4.6 when setup runs.
-3. Best-effort `agentDefaultModel.saveSelection` so the deployment default is not DeepSeek.
-4. Writes `request/header` only when that provider is already on `listProviders()`. The live second-prompt miss wrote `{ provider: grok, model: deepseek-v4-flash }` (`agentOptions.model` is the host default). `selectionFor()` then preferred that header and refused `session.prompt` with `no adapter serves provider "grok"`.
+1. Registers a **catalog-only** adapter from plugin `apply` for `claude` / `codex` / `cursor` / `grok` (Grok seeded with live 1.0.5 gold: grok-4.6 / grok-4.5; Claude Code with live ACP 0.70 `default` / `opus[1m]` / `sonnet` / `haiku`). The adapter implements the host `LlmAdapter` surface `registerAdapter` actually calls (`providerRetryPolicy` → `undefined`, `imageRequestPricing` → `undefined`, `prepareCall`). `stream()` throws; generation stays on the official child. After seed, `listProviders()` must contain those ids or we `logger.error` and throw — a missing `providerRetryPolicy` was a TypeError that we used to swallow, leaving `groups` DeepSeek-only and `routable: false`.
+2. Resolves the official child from **`session.header.agentPreset` first**. The host-wide default in `agentOptions.provider` must not turn a Claude Code / Codex / Cursor session into Grok.
+3. Wraps `session.requestHeader()` so `selectionFor().current` is this product before the first prompt. We do **not** append `model/selection` — DSH does not read that event, and it is missing from `KNOWN_SESSION_EVENT_TYPES` (resume would refuse the log).
+4. Best-effort `agentDefaultModel.saveSelection` so a later session *without* a preset is not DeepSeek. Per-session current does not depend on that write.
+5. Writes `request/header` only when that provider is already on `listProviders()`. The live second-prompt miss wrote `{ provider: grok, model: deepseek-v4-flash }` (`agentOptions.model` is the host default). `selectionFor()` then preferred that header and refused `session.prompt` with `no adapter serves provider "grok"`.
 
 `session.selectModel` calls `ctx.llm.resolveCallConfig` then maps onto ACP `session/set_config_option` using the child's option ids (Grok: `grok-4.6` / `grok-4.5` and mode `high`). Authenticate is not called unless the child requires it — Grok's `_meta.defaultAuthMethodId` is `cached_token`; we do not scrape `~/.grok/auth.json`.
 
@@ -159,6 +160,8 @@ Root `cordis.patch.yml` also inserts `lumine-goal-completion` (`timeoutMs: 90000
   config:
     permission: yolo          # or ask (uses dsh-user-approval; still allows if no answerer)
     defaultProvider: claude   # claude | codex | cursor | grok
+    worktrees:
+      mode: auto              # auto | always | never (Raphael-shaped pooled trees)
     providers:
       cursor:
         command: cursor-agent
@@ -174,6 +177,21 @@ Root `cordis.patch.yml` also inserts `lumine-goal-completion` (`timeoutMs: 90000
 ```
 
 Permission default is **yolo** (`allow_always` / `--always-approve` / bypass where the product supports it). Tool calls still land in the transcript.
+
+### Worktrees
+
+Sessions whose picker cwd is a git repo run the official CLI in a **pooled git worktree**, same model as Raphael:
+
+- Pool path: `~/atlassian/.lumine/worktrees/<repo>-<sha6(remote)>/<n>/<repo>` on an Atlassian box (`~/atlassian` exists), otherwise `~/.lumine/worktrees/…`. Separate from Raphael's `.raphael/worktrees` so the two apps cannot steal each other's trees.
+- A nil base starts from the **refreshed default branch** (`origin/HEAD`, then `origin/master` / `origin/main` / `master` / `main`). Never the picker HEAD — a feature checkout routinely carries unmerged commits.
+- Reclaim is conservative: a tree is reused only when the checkout is clean and the committed work is on the mainline or the exact tip is already on a remote. Dirty / unlanded trees are left alone.
+- Idle trees stay until the pool grows past **10**; claimable extras are removed on release.
+- Checkout uses `checkout.workers=4`, never `0` (one worker per core lags the machine).
+- Resume re-attaches the stored `worktreePath` on `request/context` without resetting in-progress files.
+- Already-pooled cwd (Lumine or Raphael) is used as-is so trees are not nested.
+- Acquire is fail-open: a git error logs a warning and the session uses the picker path.
+
+`mode: never` disables pooling. `always` fails the session if cwd is not a git repo.
 
 ## Layout
 

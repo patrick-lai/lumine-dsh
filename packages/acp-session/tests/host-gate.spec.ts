@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   AcpCatalogAdapter,
   AcpCatalogRegistry,
+  adoptPickerCurrent,
   catalogRoute,
+  claudeSeedCatalog,
   fallbackCatalog,
   grokSeedCatalog,
   hostSelectionCurrent,
   hostServesProvider,
   hostSessionModels,
-  lastModelSelection,
   mountAcpCatalog,
   pickerSnapshot,
   seedSessionRoute,
@@ -38,11 +39,13 @@ describe('host session.models / session.prompt gate (live box failure)', () => {
       append(type: string, data: unknown) {
         this.events.push({ type, data })
       },
+      requestHeader() {
+        return undefined as { config?: { provider: string; model: string } } | undefined
+      },
     }
     const seeded = seedSessionRoute(session, grok ?? grokSeedCatalog())
-    const picked = lastModelSelection(session.events)
     const current = hostSelectionCurrent({
-      picked,
+      requestHeader: session.requestHeader()?.config,
       defaultSelection: DEEPSEEK_DEFAULT,
     })
     const picker = pickerSnapshot(registry.adapter, current)
@@ -50,14 +53,17 @@ describe('host session.models / session.prompt gate (live box failure)', () => {
 
     expect(seeded).toEqual({ provider: 'grok', model: 'grok-4.6', reasoningEffort: 'high' })
     expect(current).toEqual({ provider: 'grok', model: 'grok-4.6', reasoningEffort: 'high' })
+    expect(JSON.stringify(session.events)).not.toMatch(/model\/selection/)
     expect(picker.routable).toBe(true)
     expect(host.routable).toBe(true)
     expect(host.groups.map(group => group.id)).toEqual(['claude', 'codex', 'cursor', 'grok'])
     expect(host.groups.find(group => group.id === 'grok')?.models.map(model => model.id))
       .toEqual(['grok-4.6', 'grok-4.5'])
     expect(host.groups.some(group => group.id === 'deepseek-official')).toBe(false)
+    expect(picker.groups.map(group => group.id)).toEqual(['grok'])
     expect(picker.groups.find(group => group.id === 'grok')?.models.map(model => model.id))
       .toEqual(['grok-4.6', 'grok-4.5'])
+    expect(picker.groups.some(group => group.id === 'claude' || group.id === 'codex' || group.id === 'cursor')).toBe(false)
   })
 
   it('fails seedDefaults if listProviders does not include grok', () => {
@@ -95,21 +101,27 @@ describe('host session.models / session.prompt gate (live box failure)', () => {
     }).rejects.toThrow(/does not generate/)
   })
 
-  it('reproduces the live miss: selectionFor before model/selection keeps DeepSeek current', () => {
-    const session = {
-      events: [] as Array<{ type: string; data: unknown }>,
-      append(type: string, data: unknown) {
-        this.events.push({ type, data })
-      },
-    }
-    const pickedAtSetup = lastModelSelection(session.events)
-    seedSessionRoute(session, grokSeedCatalog())
+  it('reproduces the live miss: unwrapped requestHeader falls through to the global default', () => {
     const current = hostSelectionCurrent({
-      picked: pickedAtSetup,
       defaultSelection: DEEPSEEK_DEFAULT,
     })
     expect(current).toEqual(DEEPSEEK_DEFAULT)
-    expect(lastModelSelection(session.events)?.provider).toBe('grok')
+  })
+
+  it('requestHeader wrap makes Claude current even when the global default is Grok', () => {
+    const session = {
+      requestHeader() {
+        return undefined as { config?: { provider: string; model: string } } | undefined
+      },
+    }
+    adoptPickerCurrent(session, () => selectionFromCatalog(claudeSeedCatalog()))
+    const current = hostSelectionCurrent({
+      requestHeader: session.requestHeader()?.config,
+      defaultSelection: { provider: 'grok', model: 'grok-4.6', reasoningEffort: 'high' },
+    })
+    expect(current).toMatchObject({ provider: 'claude', model: 'default' })
+    expect(current.provider).not.toBe('grok')
+    expect(current.provider).not.toBe('deepseek-official')
   })
 
   it('falls back to request/header when picked is empty, then agent-default-model', () => {

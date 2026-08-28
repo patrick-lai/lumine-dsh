@@ -67,17 +67,61 @@ export function isProviderId(value: string | undefined): value is ProviderId {
   return value !== undefined && (PROVIDER_IDS as readonly string[]).includes(value)
 }
 
-/** Map a DSH preset id, agentOptions.provider, or alias onto a provider. */
+/**
+ * Map a DSH preset id, agentOptions.provider, or alias onto a provider.
+ *
+ * The web picker choice is `session.header.agentPreset`. Host `session.create`
+ * always stuffs the *global* `agent-default-model` into `agentOptions.provider`
+ * (last session's product, often grok). That host-wide default must not win
+ * over Claude Code / Codex / Cursor when those presets are selected.
+ */
 export function resolveProviderId(
   input: { preset?: string; provider?: string; fallback: ProviderId },
 ): ProviderId {
-  const fromProvider = input.provider?.trim().toLowerCase()
-  if (fromProvider && isProviderId(fromProvider)) return fromProvider
-  if (fromProvider && PRESET_TO_PROVIDER[fromProvider]) return PRESET_TO_PROVIDER[fromProvider]
   const fromPreset = input.preset?.trim().toLowerCase()
   if (fromPreset && PRESET_TO_PROVIDER[fromPreset]) return PRESET_TO_PROVIDER[fromPreset]
   if (fromPreset && isProviderId(fromPreset)) return fromPreset
+  const fromProvider = input.provider?.trim().toLowerCase()
+  if (fromProvider && isProviderId(fromProvider)) return fromProvider
+  if (fromProvider && PRESET_TO_PROVIDER[fromProvider]) return PRESET_TO_PROVIDER[fromProvider]
   return input.fallback
+}
+
+/** Latest `agent-preset/selected` id, matching host `resolveSessionPreset`. */
+export function lastSelectedAgentPreset(
+  events: ReadonlyArray<{ type: string; data: unknown }> | undefined,
+): string | undefined {
+  if (events === undefined) return undefined
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'agent-preset/selected') continue
+    const data = event.data
+    if (data === null || typeof data !== 'object') continue
+    const preset = (data as { agentPreset?: unknown }).agentPreset
+    if (typeof preset === 'string' && preset.trim()) return preset
+  }
+  return undefined
+}
+
+/**
+ * ACP product the composer picker should list for this session.
+ * `agent-preset/selected` wins over the creation header, which wins over
+ * the factory-constructed provider. Undefined when nothing names a product
+ * — the host catalog is then left unfiltered.
+ */
+export function providerFromSession(input: {
+  preset?: string
+  events?: ReadonlyArray<{ type: string; data: unknown }>
+  provider?: string
+}): ProviderId | undefined {
+  const preset = lastSelectedAgentPreset(input.events) ?? input.preset
+  if (preset) return resolveProviderId({ preset, fallback: 'claude' })
+  const named = input.provider?.trim().toLowerCase()
+  if (!named) return undefined
+  if (isProviderId(named) || PRESET_TO_PROVIDER[named]) {
+    return resolveProviderId({ provider: named, fallback: 'claude' })
+  }
+  return undefined
 }
 
 export interface ResolveLaunchOptions {

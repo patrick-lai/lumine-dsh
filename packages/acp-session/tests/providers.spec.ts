@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   MissingCliError,
+  lastSelectedAgentPreset,
+  providerFromSession,
   resolveLaunch,
   resolveProviderId,
   whichOnPath,
@@ -26,6 +28,41 @@ describe('provider id aliases', () => {
     expect(resolveProviderId({ preset: 'grok-build', fallback: 'claude' })).toBe('grok')
     expect(resolveProviderId({ provider: 'cursor', fallback: 'claude' })).toBe('cursor')
     expect(resolveProviderId({ provider: 'agent', fallback: 'claude' })).toBe('claude')
+  })
+
+  it('lets the selected preset win over the host-wide agent-default-model', () => {
+    expect(resolveProviderId({
+      preset: 'claude-code',
+      provider: 'grok',
+      fallback: 'cursor',
+    })).toBe('claude')
+    expect(resolveProviderId({
+      preset: 'codex',
+      provider: 'grok',
+      fallback: 'claude',
+    })).toBe('codex')
+    expect(resolveProviderId({
+      preset: 'cursor',
+      provider: 'deepseek-official',
+      fallback: 'grok',
+    })).toBe('cursor')
+    expect(resolveProviderId({
+      preset: 'grok-build',
+      provider: 'claude',
+      fallback: 'codex',
+    })).toBe('grok')
+  })
+
+  it('maps the live session preset onto the picker provider', () => {
+    expect(lastSelectedAgentPreset(undefined)).toBeUndefined()
+    expect(providerFromSession({ preset: 'claude-code', provider: 'grok' })).toBe('claude')
+    expect(providerFromSession({
+      preset: 'claude-code',
+      events: [{ type: 'agent-preset/selected', data: { agentPreset: 'grok-build' } }],
+      provider: 'claude',
+    })).toBe('grok')
+    expect(providerFromSession({ provider: 'cursor' })).toBe('cursor')
+    expect(providerFromSession({ provider: 'deepseek-official' })).toBeUndefined()
   })
 })
 

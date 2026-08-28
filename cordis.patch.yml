@@ -18,6 +18,8 @@
       config:
         permission: yolo
         defaultProvider: claude
+        worktrees:
+          mode: auto
     # Deferred DSH completion policy. tools/execute around-hook certifies
     # worker update_goal complete, then the original execute commits.
     # ACP marker harvest mounts INSTEAD OF goal-round-driver on lumine ACP

@@ -12,27 +12,30 @@ import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import type { AgentCancelCause, Session, SessionId } from '@deepseek-ai/dsh-session'
 import { AcpChild } from './client.ts'
-import type { ResolvedConfig } from './config.ts'
+import { resolveWorktrees, type ResolvedConfig, type ResolvedWorktreeConfig } from './config.ts'
 import {
   TurnProjector,
   hasRequestHeader,
   lastBoundAcpSession,
+  lastBoundWorktree,
   userMessageText,
   type LogOp,
 } from './events.ts'
+import type { LastModelsStore } from './last-models.ts'
 import {
+  adoptPickerCurrent,
   catalogRoute,
   fallbackCatalog,
   hostServesProvider,
   lastModelSelection,
   projectAcpModels,
-  seedSessionRoute,
   selectionEquals,
+  selectionForAgent,
   type AcpCatalogRegistry,
   type HostModelSelection,
   type ProjectedCatalog,
 } from './models.ts'
-import { MissingCliError, resolveLaunch, type ProviderId } from './providers.ts'
+import { MissingCliError, providerFromSession, resolveLaunch, type ProviderId } from './providers.ts'
 import {
   describeError,
   driverErrorRecord,
@@ -41,6 +44,7 @@ import {
   nextTurnOf,
   openTurnThenClaim,
 } from './turn.ts'
+import { acquireWorktree, releaseWorktree, type AcquiredWorktree } from './worktree.ts'
 
 type Phase =
   | { kind: 'idle'; lastTurn: number }
@@ -77,16 +81,21 @@ export class AcpSessionAgent implements Agent {
   private headerLogged = false
   private lastWrittenSelection: HostModelSelection | undefined
   private bound = false
+  private worktree: AcquiredWorktree | undefined
+  private providerId: ProviderId
+  private adopting: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly loopCtx: Context,
     readonly id: SessionId,
     readonly options: AgentOptions,
     readonly session: Session,
-    readonly provider: ProviderId,
+    provider: ProviderId,
     private readonly config: ResolvedConfig,
     private readonly catalog: AcpCatalogRegistry,
+    private readonly lastModels?: LastModelsStore,
   ) {
+    this.providerId = provider
     this.inbox = new Inbox(session, {
       inserted: () => { this.wakeDriver() },
       discarded: () => {},
@@ -101,9 +110,13 @@ export class AcpSessionAgent implements Agent {
       const session = subject as Session
       const row = event as { type?: string; data?: unknown }
       if (session.id !== this.session.id) return
-      if (row.type !== 'model/selection') return
-      this.noteHostSelection(row.data as HostModelSelection)
+      if (row.type === 'model/selection') this.noteHostSelection(row.data as HostModelSelection)
+      if (row.type === 'agent-preset/selected') this.notePresetSelection(row.data)
     })
+  }
+
+  get provider(): ProviderId {
+    return this.providerId
   }
 
   private interceptSelectionWrites(): void {
@@ -112,6 +125,7 @@ export class AcpSessionAgent implements Agent {
     const intercepted = ((type: string, data: unknown, opts?: Parameters<Session['append']>[2]) => {
       const event = opts === undefined ? append(type, data) : append(type, data, opts)
       if (type === 'model/selection') this.noteHostSelection(data as HostModelSelection)
+      if (type === 'agent-preset/selected') this.notePresetSelection(data)
       return event
     }) as Session['append']
     try {
@@ -131,8 +145,37 @@ export class AcpSessionAgent implements Agent {
     return this.catalog.adapter.projected(this.provider) ?? fallbackCatalog(this.provider)
   }
 
+  private pickerSelection(catalog = this.currentCatalog()): HostModelSelection {
+    return selectionForAgent(catalog, this.lastModels?.recall(catalog.provider))
+  }
+
   private currentRoute(): { provider: ProviderId; model: string } {
-    return catalogRoute(this.currentCatalog(), lastModelSelection(this.session.events))
+    return catalogRoute(this.currentCatalog(), lastModelSelection(this.session.events) ?? this.lastWrittenSelection)
+  }
+
+  private notePresetSelection(data: unknown): void {
+    const record = data !== null && typeof data === 'object'
+      ? data as { agentPreset?: unknown }
+      : undefined
+    const preset = typeof record?.agentPreset === 'string' ? record.agentPreset : undefined
+    const next = providerFromSession({ preset })
+    if (next === undefined || next === this.providerId) return
+    this.adopting = this.adopting.then(() => this.adoptProvider(next), () => this.adoptProvider(next))
+  }
+
+  /**
+   * Blank-session agent swap: move the official child and picker onto the
+   * new product's last-used (or default) model. Started sessions stay locked.
+   */
+  async adoptProvider(next: ProviderId): Promise<void> {
+    if (next === this.providerId) return
+    if (this.session.events.some(event => event.type === 'turn/start')) return
+    this.providerId = next
+    this.bound = false
+    this.headerLogged = false
+    await this.disposeChild()
+    this.adoptSeedRoute()
+    await this.bindOfficialChild()
   }
 
   private hostLlm(): { listProviders?: () => Array<{ id: string }> } | undefined {
@@ -143,21 +186,22 @@ export class AcpSessionAgent implements Agent {
 
   /**
    * Host `session.create` setup calls `selectionFor()` *before*
-   * `bindOfficialChild()`. That first call freezes `picked` from
-   * `model/selection` pending (or falls through to `agent-default-model` =
-   * deepseek-official / deepseek-v4-flash). Write the ACP product's row now.
-   *
-   * `request/header` is turn-enclosed by the session invariant, so it cannot
-   * move `current` before the first prompt. `agentDefaultModel.saveSelection`
-   * is best-effort (needs the settings provider).
+   * `bindOfficialChild()`. `selectionFor().current` is picked (selectModel)
+   * or `requestHeader()?.config` or the host-wide `agent-default-model`
+   * (often grok-4.6 from a previous session). `request/header` is
+   * turn-enclosed, so wrap `requestHeader()` to report this product until
+   * the first real header. Do not append `model/selection` — DSH does not
+   * read it and persistence refuses the unknown type on resume.
    */
   private adoptSeedRoute(): void {
+    adoptPickerCurrent(this.session, () => this.pickerSelection())
     this.publishCatalog(this.currentCatalog())
   }
 
   private writeSelection(catalog: ProjectedCatalog): void {
-    const next = seedSessionRoute(this.session, catalog)
+    const next = this.pickerSelection(catalog)
     this.lastWrittenSelection = next
+    this.lastModels?.remember(next)
     this.adoptHostDefault(next)
   }
 
@@ -211,15 +255,19 @@ export class AcpSessionAgent implements Agent {
         this.catalog.publish(projectAcpModels(this.provider, payload))
       }
       const sessionId = await child.ensure()
-      this.publishCatalog(child.projectCatalog(this.provider))
-      if (!lastBoundAcpSession(this.session.events)) {
-        const route = this.currentRoute()
-        this.session.append('request/context', {
-          provider: route.provider,
-          model: route.model,
-          acpSessionId: sessionId,
-        })
+      const live = child.projectCatalog(this.provider)
+      const desired = this.pickerSelection(live)
+      if (desired.model !== live.currentModel || desired.reasoningEffort !== live.reasoning?.current) {
+        try {
+          await child.applyHostSelection(this.provider, desired)
+        } catch (error: unknown) {
+          this.loopCtx.logger.warn(
+            `lumine-acp-session: last-used model not applied: ${error instanceof Error ? error.message : String(error)}`,
+          )
+        }
       }
+      this.publishCatalog(child.projectCatalog(this.provider))
+      this.persistBinding(sessionId)
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)
       this.loopCtx.logger.warn(`lumine-acp-session: official CLI not ready at session start: ${message}`)
@@ -355,10 +403,46 @@ export class AcpSessionAgent implements Agent {
     }
   }
 
-  private cwd(): string {
+  private worktreeConfig(): ResolvedWorktreeConfig {
+    return this.config.worktrees ?? resolveWorktrees({ mode: 'never' })
+  }
+
+  private pickerCwd(): string {
     const cwd = this.session.header.cwd
     if (cwd && cwd.startsWith('/')) return cwd
     return process.cwd()
+  }
+
+  private persistBinding(sessionId: string): void {
+    const boundAcp = lastBoundAcpSession(this.session.events)
+    const boundTree = lastBoundWorktree(this.session.events)
+    const treePath = this.worktree?.cwd
+    if (boundAcp === sessionId && (treePath === undefined || boundTree === treePath)) return
+    const route = this.currentRoute()
+    this.session.append('request/context', {
+      provider: route.provider,
+      model: route.model,
+      acpSessionId: sessionId,
+      ...treePath === undefined ? {} : { worktreePath: treePath },
+    })
+  }
+
+  private async resolveCwd(): Promise<string> {
+    if (this.worktree) return this.worktree.cwd
+    if (this.worktreeConfig().mode === 'never') return this.pickerCwd()
+    try {
+      this.worktree = await acquireWorktree({
+        cwd: this.pickerCwd(),
+        config: this.worktreeConfig(),
+        sessionId: this.id,
+        resumePath: lastBoundWorktree(this.session.events),
+        agent: this.provider,
+      })
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.loopCtx.logger.warn(`lumine-acp-session: worktree acquire failed, using picker cwd: ${message}`)
+    }
+    return this.worktree?.cwd ?? this.pickerCwd()
   }
 
   private async ensureChild(): Promise<AcpChild> {
@@ -368,7 +452,7 @@ export class AcpSessionAgent implements Agent {
     })
     const child = new AcpChild({
       launch,
-      cwd: this.cwd(),
+      cwd: await this.resolveCwd(),
       permission: this.config.permission,
       agent: this,
       approval: this.loopCtx.get('approval') ?? undefined,
@@ -506,5 +590,15 @@ export class AcpSessionAgent implements Agent {
     const child = this.child
     this.child = undefined
     await child?.dispose()
+    const tree = this.worktree
+    this.worktree = undefined
+    if (tree) {
+      try {
+        await releaseWorktree(tree, this.worktreeConfig())
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.loopCtx.logger.warn(`lumine-acp-session: worktree release failed: ${message}`)
+      }
+    }
   }
 }

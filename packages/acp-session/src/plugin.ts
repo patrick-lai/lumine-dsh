@@ -14,7 +14,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { resolveConfig, type Config } from './config.ts'
 import { LumineAcpFactory } from './factory.ts'
+import { createLastModelsStore } from './last-models.ts'
 import { mountAcpCatalog } from './models.ts'
+import { installSessionPickerGate } from './picker-gate.ts'
 import { installPickerPresets } from './presets.ts'
 
 export const name = 'lumine-acp-session'
@@ -25,18 +27,38 @@ export const name = 'lumine-acp-session'
  */
 export const inject = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt']
 
-export type { Config, PermissionMode, ProviderOverride } from './config.ts'
-export { resolveConfig } from './config.ts'
+export type { Config, PermissionMode, ProviderOverride, WorktreeConfig, WorktreeMode } from './config.ts'
+export { resolveConfig, resolveWorktrees } from './config.ts'
+export {
+  acquireWorktree,
+  mapWorkspaceIntoTree,
+  PARALLEL_CHECKOUT,
+  releaseWorktree,
+  resolveStartPoint,
+  START_POINT_CANDIDATES,
+} from './worktree.ts'
+export { classifyReclaim, isClaimable } from './worktree-reclaim.ts'
+export {
+  detectAtlassian,
+  isPooledWorktreePath,
+  poolRoot,
+  repoName,
+  sha6,
+  slug,
+  WORKTREES_LEAF,
+} from './worktree-pool.ts'
 export {
   MissingCliError,
   PRESET_TO_PROVIDER,
   PROVIDER_IDS,
+  lastSelectedAgentPreset,
+  providerFromSession,
   resolveLaunch,
   resolveProviderId,
   whichOnPath,
 } from './providers.ts'
 export type { ProviderId, ResolvedLaunch } from './providers.ts'
-export { TurnProjector, lastBoundAcpSession, userMessageText } from './events.ts'
+export { TurnProjector, lastBoundAcpSession, lastBoundWorktree, userMessageText } from './events.ts'
 export {
   describeError,
   driverErrorRecord,
@@ -48,9 +70,13 @@ export {
 export {
   AcpCatalogAdapter,
   AcpCatalogRegistry,
+  adoptPickerCurrent,
   catalogRoute,
+  claudeSeedCatalog,
   configIdForModel,
   configIdForReasoning,
+  constrainSessionCatalog,
+  cursorSeedCatalog,
   fallbackCatalog,
   grokSeedCatalog,
   hostSelectionCurrent,
@@ -61,9 +87,17 @@ export {
   pickerSnapshot,
   projectAcpModels,
   seedSessionRoute,
+  selectionForAgent,
   selectionFromCatalog,
+  selectionSupportedByAgent,
 } from './models.ts'
 export type { CatalogModel, HostModelSelection, ProjectedCatalog } from './models.ts'
+export {
+  gateApiProxySessions,
+  installSessionPickerGate,
+  providerOfPickerSession,
+} from './picker-gate.ts'
+export { LastModelsStore, createLastModelsStore, lastModelsPath, parseLastModels } from './last-models.ts'
 export { ensureDshPeers, DSH_PEERS } from './peers.ts'
 
 export function apply(ctx: Context, config: Config = {}): void {
@@ -78,7 +112,9 @@ export function apply(ctx: Context, config: Config = {}): void {
   // Register on the host llm from apply — not the factory constructor —
   // so listProviders() already contains grok before session.create.
   const catalog = mountAcpCatalog(ctx)
-  ctx.plugin(LumineAcpFactory, { ...resolved, catalog })
+  const lastModels = createLastModelsStore()
+  installSessionPickerGate(ctx as never, catalog, lastModels)
+  ctx.plugin(LumineAcpFactory, { ...resolved, catalog, lastModels })
 }
 
 export default {

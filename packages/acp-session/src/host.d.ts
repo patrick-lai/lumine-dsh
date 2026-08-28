@@ -102,6 +102,13 @@ declare module '@deepseek-ai/dsh-session' {
     readonly header: SessionHeader
     readonly events: readonly SessionEvent[]
     append(type: string, data: unknown, opts?: { surfaceOp?: 'append'; sourceEventSeqs?: number[] }): SessionEvent
+    /**
+     * Fold of `request/header` events. Host `selectionFor().current` reads
+     * this when no in-process `selectModel` pick exists. Undefined before the
+     * first turn-enclosed header; this plugin wraps the method so an ACP
+     * session reports its product before that first prompt.
+     */
+    requestHeader?(): { config: { provider: string; model: string; reasoningEffort?: string } } | undefined
   }
 
   export interface SessionStore {

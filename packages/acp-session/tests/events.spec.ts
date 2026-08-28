@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TurnProjector, lastBoundAcpSession, userMessageText } from '../src/events.ts'
+import { TurnProjector, lastBoundAcpSession, lastBoundWorktree, userMessageText } from '../src/events.ts'
 
 function types(ops: Array<{ type: string }>): string[] {
   return ops.map(op => op.type)
@@ -98,5 +98,9 @@ describe('TurnProjector ACP → DSH session log', () => {
       { type: 'turn/start', data: {} },
       { type: 'request/context', data: { provider: 'grok', model: 'grok', acpSessionId: 's-9' } },
     ])).toBe('s-9')
+    expect(lastBoundWorktree([
+      { type: 'request/context', data: { acpSessionId: 's-9' } },
+      { type: 'request/context', data: { acpSessionId: 's-9', worktreePath: '/tmp/tree/repo' } },
+    ])).toBe('/tmp/tree/repo')
   })
 })

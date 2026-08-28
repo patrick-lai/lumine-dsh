@@ -346,6 +346,16 @@ export function lastBoundAcpSession(events: ReadonlyArray<{ type: string; data: 
   return undefined
 }
 
+export function lastBoundWorktree(events: ReadonlyArray<{ type: string; data: unknown }>): string | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'request/context' && event?.type !== 'lumine-acp/bound') continue
+    const data = event.data as { worktreePath?: unknown }
+    if (typeof data.worktreePath === 'string' && data.worktreePath.startsWith('/')) return data.worktreePath
+  }
+  return undefined
+}
+
 export function hasRequestHeader(events: ReadonlyArray<{ type: string }>): boolean {
   return events.some(event => event.type === 'request/header')
 }
