@@ -1,59 +1,44 @@
 /**
- * ACP session factory for DeepSeek Harness.
- *
- * Replaces `@deepseek-ai/dsh-agent-loop` so a Web session IS Claude Code,
- * Codex, Cursor, or Grok Build. The official product process owns tools;
- * DSH owns the append-only session log the Web UI reads.
- *
- * @module @lumine/dsh-acp-session
+ * Package entry. Link DSH peers from the profile `node_modules`, then load
+ * the plugin. Static `export * from './plugin'` would hoist `@deepseek-ai/cordis`
+ * before the symlink exists.
  */
+import { ensureDshPeers } from './peers.ts'
 
-import type { Context } from '@deepseek-ai/cordis'
-import { resolveConfig, type Config } from './config.ts'
-import { LumineAcpFactory } from './factory.ts'
-import { installPickerPresets } from './presets.ts'
+ensureDshPeers(import.meta.url)
 
-export const name = 'lumine-acp-session'
-export const inject = ['agents', 'sessions', 'llm']
+const plugin = await import('./plugin.ts')
+
+export const name = plugin.name
+export const inject = plugin.inject
+export const apply = plugin.apply
+export const resolveConfig = plugin.resolveConfig
+export const MissingCliError = plugin.MissingCliError
+export const PRESET_TO_PROVIDER = plugin.PRESET_TO_PROVIDER
+export const PROVIDER_IDS = plugin.PROVIDER_IDS
+export const resolveLaunch = plugin.resolveLaunch
+export const resolveProviderId = plugin.resolveProviderId
+export const whichOnPath = plugin.whichOnPath
+export const TurnProjector = plugin.TurnProjector
+export const lastBoundAcpSession = plugin.lastBoundAcpSession
+export const userMessageText = plugin.userMessageText
+export const AcpCatalogAdapter = plugin.AcpCatalogAdapter
+export const AcpCatalogRegistry = plugin.AcpCatalogRegistry
+export const configIdForModel = plugin.configIdForModel
+export const configIdForReasoning = plugin.configIdForReasoning
+export const fallbackCatalog = plugin.fallbackCatalog
+export const grokSeedCatalog = plugin.grokSeedCatalog
+export const hostSelectionCurrent = plugin.hostSelectionCurrent
+export const lastModelSelection = plugin.lastModelSelection
+export const pickerSnapshot = plugin.pickerSnapshot
+export const projectAcpModels = plugin.projectAcpModels
+export const seedSessionRoute = plugin.seedSessionRoute
+export const selectionFromCatalog = plugin.selectionFromCatalog
+export const DSH_PEERS = plugin.DSH_PEERS
+export { ensureDshPeers }
 
 export type { Config, PermissionMode, ProviderOverride } from './config.ts'
-export { resolveConfig } from './config.ts'
-export {
-  MissingCliError,
-  PRESET_TO_PROVIDER,
-  PROVIDER_IDS,
-  resolveLaunch,
-  resolveProviderId,
-  whichOnPath,
-} from './providers.ts'
 export type { ProviderId, ResolvedLaunch } from './providers.ts'
-export { TurnProjector, lastBoundAcpSession, userMessageText } from './events.ts'
-export {
-  AcpCatalogAdapter,
-  AcpCatalogRegistry,
-  configIdForModel,
-  configIdForReasoning,
-  fallbackCatalog,
-  lastModelSelection,
-  pickerSnapshot,
-  projectAcpModels,
-} from './models.ts'
 export type { CatalogModel, HostModelSelection, ProjectedCatalog } from './models.ts'
 
-export function apply(ctx: Context, config: Config = {}): void {
-  try {
-    installPickerPresets()
-  } catch (error: unknown) {
-    ctx.logger.warn(
-      `lumine-acp-session: could not install picker presets: ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
-  const resolved = resolveConfig(config)
-  ctx.plugin(LumineAcpFactory, resolved)
-}
-
-export default {
-  name,
-  inject,
-  apply,
-}
+export default plugin.default

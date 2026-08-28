@@ -120,7 +120,12 @@ export class LumineAcpFactory extends Service implements AgentFactory {
     super(ctx, 'lumineAcpSession')
     this.ownership = new FactoryOwnership(ctx.fiber)
     this.runtime = { ctx }
-    this.catalog = new AcpCatalogRegistry(ctx.get('llm') as ConstructorParameters<typeof AcpCatalogRegistry>[0])
+    this.catalog = new AcpCatalogRegistry(
+      (ctx.llm ?? ctx.get('llm')) as ConstructorParameters<typeof AcpCatalogRegistry>[0],
+    )
+    // Register grok/claude/codex/cursor before any session.create so
+    // routeServed('grok') is true and session.models.groups is not empty.
+    this.catalog.seedDefaults()
     ctx.effect(() => () => this.ownership.dispose(), 'lumineAcpSession.transactions()')
     ctx.effect(() => ctx.agents.setFactory(this), 'lumineAcpSession.setFactory()')
   }

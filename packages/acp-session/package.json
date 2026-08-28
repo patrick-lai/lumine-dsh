@@ -18,6 +18,7 @@
     "lib",
     "cordis.patch.yml",
     "presets",
+    "scripts",
     "README.md"
   ],
   "keywords": [
@@ -35,7 +36,7 @@
     }
   },
   "scripts": {
-    "prepare": "tsdown --config tsdown.prepare.config.mjs --config-loader native",
+    "prepare": "tsdown --config tsdown.prepare.config.mjs --config-loader native && (node scripts/ensure-dsh-peers.mjs || true)",
     "build": "tsdown --config tsdown.config.mjs --config-loader native",
     "build:prepare": "tsdown --config tsdown.prepare.config.mjs --config-loader native",
     "test": "vitest run"

@@ -316,7 +316,55 @@ export function hasCatalogHints(payload: unknown): boolean {
   return false
 }
 
+const GROK_MODE_EFFORTS = [
+  { id: 'xhigh', name: 'X-High' },
+  { id: 'high', name: 'High' },
+  { id: 'medium', name: 'Medium' },
+  { id: 'low', name: 'Low' },
+] as const
+
+/**
+ * Live Grok Build 1.0.5 catalog (initialize.modelState + session/new).
+ * Seed this at plugin apply so `session.models` is Grok 4.6/4.5 before the
+ * child is spawned. Do not invent grok-4 / grok-3 ids.
+ */
+export function grokSeedCatalog(): ProjectedCatalog {
+  return {
+    provider: 'grok',
+    providerName: PROVIDER_LABEL.grok,
+    models: [
+      {
+        id: 'grok-4.6',
+        name: 'Grok 4.6',
+        reasoning: {
+          efforts: GROK_MODE_EFFORTS.map(effort => ({ ...effort })),
+          defaultEffort: 'high',
+        },
+      },
+      {
+        id: 'grok-4.5',
+        name: 'Grok 4.5',
+        reasoning: {
+          efforts: GROK_MODE_EFFORTS.filter(effort => effort.id !== 'xhigh').map(effort => ({ ...effort })),
+          defaultEffort: 'high',
+        },
+      },
+    ],
+    currentModel: 'grok-4.6',
+    modelConfigId: 'grok-4.6',
+    modelSetStyle: 'option-id',
+    reasoning: {
+      configId: 'high',
+      setStyle: 'option-id',
+      efforts: GROK_MODE_EFFORTS.map(effort => ({ ...effort })),
+      current: 'high',
+      defaultEffort: 'high',
+    },
+  }
+}
+
 export function fallbackCatalog(provider: ProviderId): ProjectedCatalog {
+  if (provider === 'grok') return grokSeedCatalog()
   return {
     provider,
     providerName: PROVIDER_LABEL[provider],
@@ -325,6 +373,28 @@ export function fallbackCatalog(provider: ProviderId): ProjectedCatalog {
     modelConfigId: 'model',
     modelSetStyle: 'select',
   }
+}
+
+export function selectionFromCatalog(catalog: ProjectedCatalog): HostModelSelection {
+  return {
+    provider: catalog.provider,
+    model: catalog.currentModel,
+    ...catalog.reasoning?.current === undefined ? {} : { reasoningEffort: catalog.reasoning.current },
+  }
+}
+
+/**
+ * Host `selectionFor(agent).current` fold: picked (from `model/selection`
+ * pending at first `selectionFor` call) OR `request/header` OR
+ * `agent-default-model`. `model/selection` appended *after* that first call
+ * does not move `current`.
+ */
+export function hostSelectionCurrent(input: {
+  picked?: HostModelSelection
+  requestHeader?: HostModelSelection
+  defaultSelection: HostModelSelection
+}): HostModelSelection {
+  return input.picked ?? input.requestHeader ?? input.defaultSelection
 }
 
 function mergeModels(layers: CatalogModel[][]): CatalogModel[] {
@@ -551,6 +621,9 @@ export class AcpCatalogAdapter {
 /**
  * Registers the catalog adapter on `ctx.llm` for whichever ACP products have
  * advertised models. Host `session.models` / `routeServed` read this registry.
+ * Call {@link seedDefaults} at plugin apply / factory construct — not only
+ * after the ACP child handshake — so `listProviders()` already contains
+ * `grok` before `session.create`.
  */
 export class AcpCatalogRegistry {
   readonly adapter = new AcpCatalogAdapter()
@@ -558,8 +631,26 @@ export class AcpCatalogRegistry {
 
   constructor(private readonly llm: LlmRegistry | undefined) {}
 
+  /**
+   * Advertise every ACP product with a seed catalog. Grok uses the live 1.0.5
+   * gold (grok-4.6 / grok-4.5). Other products use a labeled placeholder until
+   * that child's initialize + session/new replaces it.
+   */
+  seedDefaults(): void {
+    for (const provider of PROVIDER_IDS) {
+      if (this.adapter.projected(provider) === undefined) {
+        this.adapter.replace(fallbackCatalog(provider))
+      }
+    }
+    this.syncRegistration()
+  }
+
   publish(catalog: ProjectedCatalog): void {
     this.adapter.replace(catalog)
+    this.syncRegistration()
+  }
+
+  private syncRegistration(): void {
     const providers = this.adapter.advertisedProviders()
     if (providers.length === 0) return
     try {
@@ -574,6 +665,22 @@ export class AcpCatalogRegistry {
       void error
     }
   }
+}
+
+/**
+ * Persist the session's current picker row. Must run *before* host
+ * `setup` → `selectionFor()` so `picked` is this product, not
+ * `deepseek-official` / `deepseek-v4-flash`.
+ */
+export function seedSessionRoute(
+  session: { events: ReadonlyArray<{ type: string; data: unknown }>; append(type: string, data: unknown): unknown },
+  catalog: ProjectedCatalog,
+): HostModelSelection {
+  const next = selectionFromCatalog(catalog)
+  if (!selectionEquals(lastModelSelection(session.events), next)) {
+    session.append('model/selection', next)
+  }
+  return next
 }
 
 /** Test helper: what the web picker would show after our projection. */

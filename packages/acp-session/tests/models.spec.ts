@@ -122,7 +122,10 @@ describe('ACP config-option → session.models projection', () => {
   })
 
   it('falls back when the agent advertises no models', () => {
-    expect(projectAcpModels('grok', {})).toEqual(fallbackCatalog('grok'))
+    const catalog = projectAcpModels('grok', {})
+    expect(catalog).toEqual(fallbackCatalog('grok'))
+    expect(catalog.models.map(model => model.id)).toEqual(['grok-4.6', 'grok-4.5'])
+    expect(catalog.currentModel).toBe('grok-4.6')
   })
 
   it('reads legacy session/new models when configOptions is empty', () => {

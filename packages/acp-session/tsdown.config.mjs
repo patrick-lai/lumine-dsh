@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsdown'
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/plugin.ts', 'src/peers.ts'],
   format: ['esm'],
   dts: true,
   clean: true,
@@ -9,5 +9,5 @@ export default defineConfig({
   platform: 'node',
   target: 'node22',
   fixedExtension: false,
-  deps: { neverBundle: [/^@deepseek-ai\//] },
+  deps: { neverBundle: [/^@deepseek-ai\//, /^\.\/plugin(?:\.ts)?$/] },
 })

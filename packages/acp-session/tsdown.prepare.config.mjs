@@ -4,7 +4,7 @@ import { defineConfig } from 'tsdown'
 // entrypoints are self-contained (DSH publish tutorial). JS config avoids
 // tsdown's optional `unrun` loader.
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/plugin.ts', 'src/peers.ts'],
   format: ['esm'],
   dts: false,
   clean: true,
@@ -12,5 +12,5 @@ export default defineConfig({
   platform: 'node',
   target: 'node22',
   fixedExtension: false,
-  deps: { neverBundle: [/^@deepseek-ai\//] },
+  deps: { neverBundle: [/^@deepseek-ai\//, /^\.\/plugin(?:\.ts)?$/] },
 })

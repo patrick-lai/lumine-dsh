@@ -16,11 +16,21 @@ declare module '@deepseek-ai/cordis' {
       }
       listProviders(): Array<{ id: string; name: string }>
       listModels(provider: string): Promise<Array<{ provider: string; id: string; name: string; description?: string }>>
+      resolveModelInfo?(provider: string, model: string): Promise<{
+        provider: string
+        id: string
+        name: string
+        reasoning?: { efforts: Array<{ id: string; name: string }>; defaultEffort?: string }
+      }>
       resolveCallConfig(config: { provider: string; model: string; reasoningEffort?: string }): Promise<{
         provider: string
         model: string
         reasoningEffort?: string
       }>
+    }
+    agentDefaultModel?: {
+      currentSelection(): { provider: string; model: string; reasoningEffort?: string }
+      saveSelection(next: { provider: string; model: string; reasoningEffort?: string }): Promise<void>
     }
     approval?: import('@deepseek-ai/dsh-user-approval').ApprovalService
     agent?: import('@deepseek-ai/dsh-agent').Agent

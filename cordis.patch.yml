@@ -24,11 +24,11 @@
     - id: ui-directory-picker-browse
       name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
 
-# Skip official DeepSeek key onboarding. llm-deepseek's schema defaults
-# apiKeyEnv to DEEPSEEK_API_KEY (empty string fails credentialRef), which
-# keeps onboardingReadiness at credential-missing. Disabling the adapter
-# makes the step adapter-absent, which auto-completes. Re-enable this row
-# and set a real key in Settings if you want DeepSeek-native sessions later.
-# Do not write a fake DEEPSEEK_API_KEY or touch .credentials.yaml.
-- id: llm-deepseek
-  disabled: true
+# Do not disable llm-deepseek. Empty apiKeyEnv already skips the key gate;
+# disabling the adapter left session.models.current on deepseek-official with
+# nothing serving it (groups empty, prompt refused). Keep the official adapter
+# mounted. This plugin's catalog adapter serves grok/claude/codex/cursor so
+# grok-build current is grok-4.6 and routable.
+#
+# Profile `cordis.patch.yml` must not re-insert directory-picker-browse — this
+# bundle already does. A second insert is a duplicate loader id.

@@ -25,7 +25,7 @@ No API keys. `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `XAI_API_KEY` are not inje
 
 DSH's default `@deepseek-ai/dsh-agent-loop` is the host-plane **Agent factory**. `ctx.agents.setFactory()` is a unary slot and throws if a factory is already registered. Presets cannot publish host-plane services. An LLM adapter would still run DSH's tool loop. `@deepseek-ai/dsh-subagent-acp` is a one-shot *child* that returns only final text and does **not** put intermediate traffic in the parent log.
 
-So this plugin **replaces the Agent factory**, pins the in-page workspace picker, and skips DeepSeek key onboarding:
+So this plugin **replaces the Agent factory** and pins the in-page workspace picker:
 
 ```yaml
 - id: agent-loop
@@ -41,19 +41,23 @@ So this plugin **replaces the Agent factory**, pins the in-page workspace picker
       name: '@deepseek-ai/dsh-host-directory-picker-browse'
     - id: ui-directory-picker-browse
       name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
-- id: llm-deepseek
-  disabled: true
 ```
 
-`directory-picker-auto` picks the native macOS dialog on darwin. A detached `dsh` never shows that dialog, so "+ Add workspace" looks dead. The seam is disable+insert of browse (same-id name rewrite is not how later layers swap this row). Clicking an existing workspace still uses `onPick`.
+`directory-picker-auto` picks the native macOS dialog on darwin. A detached `dsh` never shows that dialog, so "+ Add workspace" looks dead. The seam is disable+insert of browse (same-id name rewrite is not how later layers swap this row). Clicking an existing workspace still uses `onPick`. **Do not copy those browse rows into the profile `cordis.patch.yml`** if this bundle already inserted them — a second insert is a duplicate loader id. The package-only overlay (`packages/acp-session/cordis.patch.yml`) therefore inserts the factory only.
 
-ACP sessions do not need a DeepSeek API key. The official adapter's schema defaults `apiKeyEnv` to `DEEPSEEK_API_KEY`; an empty/unset value is not a valid credential-ref and would crash plugin load. Disabling `llm-deepseek` makes first-run onboarding `adapter-absent`, which auto-completes. We do not write a fake `DEEPSEEK_API_KEY` and we do not touch `.credentials.yaml`. Re-enable `id: llm-deepseek` and set a real key in Settings if you want DeepSeek-native sessions later.
+ACP sessions do not need a DeepSeek API key. Empty `apiKeyEnv` already skips the official key gate. **Do not disable `llm-deepseek` as an onboarding skip.** That left `session.models.current` on `deepseek-official` / `deepseek-v4-flash` while nothing served that route (`groups: []`, `session.prompt` → `model-unavailable`). We do not write a fake `DEEPSEEK_API_KEY` and we do not touch `.credentials.yaml`.
 
 Community pattern: `dsh-loop-dock`. v1 is an ACP-only profile (DeepSeek-native sessions in the same process would register as a loop-dock driver later).
 
 Creation copies DSH's transaction: `sessions.prepare` → construct Agent → `setup(agentCtx)` → start the official ACP child → `sessions.enter` → disposer → `sessions.announce` → `agents.enter` → `agents.announce` → `agent/session-start`.
 
-The web composer picker reads host-wide `session.models` (`ctx.llm.listProviders` / `listModels`) plus the session's `model/selection`. ACP agents advertise models via `session/new` `models` / `modelState` (`availableModels` + `currentModelId`), `_meta.x.ai/sessionConfig.options` (Grok Build 1.0.5: category `model` = grok-4.6 / grok-4.5, category `mode` = xhigh/high/medium/low), standard `configOptions`, and `config_option_update` — not through DeepSeek's adapter. This plugin registers a **catalog-only** adapter for the session's product so `routable` is true and the picker lists that product's models. `stream()` throws; generation stays on the official child. `session.selectModel` maps onto `session/set_config_option` using the child's option ids (Grok: `grok-4.6` / `grok-4.5` and mode `high`). Authenticate is not called unless the child requires it — Grok's `_meta.defaultAuthMethodId` is `cached_token`; we do not scrape `~/.grok/auth.json`.
+The web composer picker reads host-wide `session.models` (`ctx.llm.listProviders` / `listModels`) plus `selectionFor(agent).current`. That current is `picked` (from `model/selection` pending at the first `selectionFor` call) or `request/header` or settings `agent-default-model` (DeepSeek by default). Host `setup` calls `selectionFor` *before* the ACP child is spawned, and `request/header` is turn-enclosed, so this plugin:
+
+1. Registers a **catalog-only** adapter at factory construct for `claude` / `codex` / `cursor` / `grok` (Grok seeded with live 1.0.5 gold: grok-4.6 / grok-4.5). `stream()` throws; generation stays on the official child.
+2. Appends `model/selection` in the Agent constructor so `picked` is already grok-4.6 when setup runs.
+3. Best-effort `agentDefaultModel.saveSelection` so the deployment default is not DeepSeek.
+
+`session.selectModel` calls `ctx.llm.resolveCallConfig` then maps onto ACP `session/set_config_option` using the child's option ids (Grok: `grok-4.6` / `grok-4.5` and mode `high`). Authenticate is not called unless the child requires it — Grok's `_meta.defaultAuthMethodId` is `cached_token`; we do not scrape `~/.grok/auth.json`.
 
 The Web UI picker is **agent presets**. On load we copy four presets into `$DSH_HOME/.agent-presets` (`claude-code`, `codex`, `cursor`, `grok-build`). Those compositions mount **no** DSH bash/fs/web tools — the child owns tools.
 
@@ -81,6 +85,8 @@ Local checkout:
 ```sh
 dsh plugin --profile web add link:/absolute/path/to/lumine-dsh
 ```
+
+A `link:` install loads `@lumine/dsh-acp-session` from its real path. Node will not see `@deepseek-ai/cordis` in the profile `node_modules` unless those peers are linked into `packages/acp-session/node_modules`. The package entry runs `ensureDshPeers()` (honors `DSH_HOME` / `DSH_PROFILE`) before importing the plugin; you can also run `node packages/acp-session/scripts/ensure-dsh-peers.mjs`.
 
 One package only:
 

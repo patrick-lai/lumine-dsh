@@ -24,6 +24,7 @@ import {
   fallbackCatalog,
   lastModelSelection,
   projectAcpModels,
+  seedSessionRoute,
   selectionEquals,
   type AcpCatalogRegistry,
   type HostModelSelection,
@@ -82,6 +83,7 @@ export class AcpSessionAgent implements Agent {
     this.scope = createScope(loopCtx, this)
     this.ctx = this.scope.ctx.extend({ agent: this })
     this.interceptSelectionWrites()
+    this.adoptSeedRoute()
     this.loopCtx.on('session/event', (subject, event) => {
       const session = subject as Session
       const row = event as { type?: string; data?: unknown }
@@ -124,15 +126,39 @@ export class AcpSessionAgent implements Agent {
     return { provider: this.provider, model: this.currentCatalog().currentModel }
   }
 
+  /**
+   * Host `session.create` setup calls `selectionFor()` *before*
+   * `bindOfficialChild()`. That first call freezes `picked` from
+   * `model/selection` pending (or falls through to `agent-default-model` =
+   * deepseek-official / deepseek-v4-flash). Write the ACP product's row now.
+   *
+   * `request/header` is turn-enclosed by the session invariant, so it cannot
+   * move `current` before the first prompt. `agentDefaultModel.saveSelection`
+   * is best-effort (needs the settings provider).
+   */
+  private adoptSeedRoute(): void {
+    this.publishCatalog(this.currentCatalog())
+  }
+
   private writeSelection(catalog: ProjectedCatalog): void {
-    const next: HostModelSelection = {
-      provider: catalog.provider,
-      model: catalog.currentModel,
-      ...catalog.reasoning?.current === undefined ? {} : { reasoningEffort: catalog.reasoning.current },
-    }
-    if (selectionEquals(lastModelSelection(this.session.events), next)) return
+    const next = seedSessionRoute(this.session, catalog)
     this.lastWrittenSelection = next
-    this.session.append('model/selection', next)
+    this.adoptHostDefault(next)
+  }
+
+  private adoptHostDefault(selection: HostModelSelection): void {
+    const defaults = (this.loopCtx.agentDefaultModel ?? this.loopCtx.get('agentDefaultModel')) as {
+      currentSelection?: () => HostModelSelection
+      saveSelection?: (next: HostModelSelection) => Promise<void>
+    } | undefined
+    if (defaults?.saveSelection === undefined) return
+    const current = defaults.currentSelection?.()
+    if (current && selectionEquals(current, selection)) return
+    void Promise.resolve(defaults.saveSelection(selection)).catch((error: unknown) => {
+      this.loopCtx.logger.warn(
+        `lumine-acp-session: agent-default-model not saved: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
   }
 
   private publishCatalog(catalog: ProjectedCatalog): void {

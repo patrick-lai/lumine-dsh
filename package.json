@@ -30,7 +30,8 @@
     "packages/acp-session/package.json",
     "packages/acp-session/cordis.patch.yml",
     "packages/acp-session/lib",
-    "packages/acp-session/presets"
+    "packages/acp-session/presets",
+    "packages/acp-session/scripts"
   ],
   "exports": {
     "./cordis.patch.yml": "./cordis.patch.yml",
