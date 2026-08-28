@@ -46,6 +46,7 @@ describe('TurnProjector ACP → DSH session log', () => {
       ...projector.finish('completed'),
     ]
 
+    expect(projector.openTurn().map(op => op.type)).toEqual(['turn/start'])
     expect(types(log)).toEqual([
       'turn/start',
       'user/message',

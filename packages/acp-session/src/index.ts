@@ -35,6 +35,10 @@ export const projectAcpModels = plugin.projectAcpModels
 export const seedSessionRoute = plugin.seedSessionRoute
 export const selectionFromCatalog = plugin.selectionFromCatalog
 export const DSH_PEERS = plugin.DSH_PEERS
+export const describeError = plugin.describeError
+export const formatDriverFailure = plugin.formatDriverFailure
+export const nextTurnOf = plugin.nextTurnOf
+export const openTurnThenClaim = plugin.openTurnThenClaim
 export { ensureDshPeers }
 
 export type { Config, PermissionMode, ProviderOverride } from './config.ts'

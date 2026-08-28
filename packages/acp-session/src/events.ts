@@ -105,12 +105,36 @@ export class TurnProjector {
     readonly route: Route,
   ) {}
 
-  startTurn(userMessage: unknown): LogOp[] {
+  /** Host order: persist this before Inbox.claim. */
+  openTurn(): LogOp[] {
+    return [{ type: 'turn/start', data: { turn: this.turn } }]
+  }
+
+  /** After claim: user message + step/start. */
+  enterStep(userMessage: unknown): LogOp[] {
     return [
-      { type: 'turn/start', data: { turn: this.turn } },
       { type: 'user/message', data: userMessage, surface: true },
       { type: 'step/start', data: { turn: this.turn, step: this.step } },
     ]
+  }
+
+  startTurn(userMessage: unknown): LogOp[] {
+    return [...this.openTurn(), ...this.enterStep(userMessage)]
+  }
+
+  /** Close an opened turn that never entered a step (claim empty or start failed after open). */
+  closeTurn(reason: 'completed' | 'aborted' | 'error', error?: { message: string; code: string }): LogOp[] {
+    return [{
+      type: 'turn/end',
+      data: {
+        turn: this.turn,
+        reason: reason === 'error' && error
+          ? { kind: 'error', error }
+          : reason === 'aborted'
+            ? { kind: 'aborted', reason: { kind: 'user' } }
+            : { kind: 'completed' },
+      },
+    }]
   }
 
   syntheticHeader(reason: 'initial' | 'resume'): LogOp[] {

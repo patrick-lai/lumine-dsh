@@ -31,6 +31,7 @@ import {
   type ProjectedCatalog,
 } from './models.ts'
 import { MissingCliError, resolveLaunch, type ProviderId } from './providers.ts'
+import { describeError, formatDriverFailure, nextTurnOf, openTurnThenClaim } from './turn.ts'
 
 type Phase =
   | { kind: 'idle'; lastTurn: number }
@@ -75,7 +76,7 @@ export class AcpSessionAgent implements Agent {
     private readonly catalog: AcpCatalogRegistry,
   ) {
     this.inbox = new Inbox(session, {
-      inserted: () => {},
+      inserted: () => { this.wakeDriver() },
       discarded: () => {},
       claimed: () => {},
     })
@@ -277,10 +278,28 @@ export class AcpSessionAgent implements Agent {
     } while (activity !== this.activityDone)
   }
 
+  private reportDriverFailure(where: string, error: unknown): void {
+    const text = formatDriverFailure(where, error)
+    this.loopCtx.logger.error(text)
+    const { message, stack } = describeError(error)
+    const turn = this.phase.kind === 'running' ? this.phase.turn : this.phase.lastTurn
+    const step = this.phase.kind === 'running' ? this.phase.step : 0
+    emitAgentEvent(this.loopCtx, this, 'agent/error', {
+      turn,
+      step,
+      error: message,
+      ...stack === undefined ? {} : { stack },
+    })
+  }
+
   private wakeDriver(wakeAfterAbort = false): void {
     if (this.phase.kind !== 'idle') {
       const reason = this.phase.abort.signal.reason as AgentCancelCause | undefined
-      if (reason?.kind !== 'disposed' && (this.phase.kind === 'maintenance' || wakeAfterAbort)) {
+      if (reason?.kind !== 'disposed' && (
+        this.phase.kind === 'maintenance'
+        || this.phase.kind === 'running'
+        || wakeAfterAbort
+      )) {
         this.phase.wakeRequested = true
       }
       return
@@ -300,8 +319,9 @@ export class AcpSessionAgent implements Agent {
   private async kick(): Promise<void> {
     try {
       while (await this.turn()) {}
-    } catch {
-      // Failures are written into the session log; the driver stays contained.
+    } catch (error: unknown) {
+      // Contain the driver so whenIdle() settles, but never hide the cause.
+      this.reportDriverFailure('kick', error)
     } finally {
       if (this.phase.kind === 'running') {
         const { turn, wakeRequested } = this.phase
@@ -341,19 +361,52 @@ export class AcpSessionAgent implements Agent {
     if (this.phase.kind !== 'running') return false
     const phase = this.phase
     const signal = phase.abort.signal
-    const claimed = this.inbox.claim('next-turn', phase.lastTurn + 1)
-    if (claimed.length === 0) return false
-
-    const turn = phase.lastTurn + 1
-    const step = 1
-    phase.turn = turn
-    phase.step = step
+    const turn = nextTurnOf(phase.turn)
+    let opened = false
+    let stepped = false
     const route = this.currentRoute()
-    const projector = new TurnProjector(turn, step, route)
+    const projector = new TurnProjector(turn, 1, route)
+
+    let claimed: ReturnType<Inbox['claim']>
+    try {
+      claimed = openTurnThenClaim(
+        next => {
+          for (const op of projector.openTurn()) appendOp(this.session, op)
+          opened = true
+          phase.turn = next
+        },
+        next => this.inbox.claim('next-turn', next),
+        turn,
+      )
+    } catch (error: unknown) {
+      this.reportDriverFailure('turn/start', error)
+      if (opened) {
+        try {
+          for (const op of projector.closeTurn('error', {
+            message: describeError(error).message,
+            code: 'ACP_TURN_START',
+          })) {
+            appendOp(this.session, op)
+          }
+        } catch (closeError: unknown) {
+          this.reportDriverFailure('turn/end after failed start', closeError)
+        }
+      }
+      throw error
+    }
+
+    if (claimed.length === 0) {
+      for (const op of projector.closeTurn('completed')) appendOp(this.session, op)
+      return false
+    }
+
+    const step = 1
+    phase.step = step
     const user = claimed[0]
 
     try {
-      for (const op of projector.startTurn(user)) appendOp(this.session, op)
+      for (const op of projector.enterStep(user)) appendOp(this.session, op)
+      stepped = true
       if (!this.headerLogged) {
         const reason = hasRequestHeader(this.session.events) ? 'resume' : 'initial'
         for (const op of projector.syntheticHeader(reason)) appendOp(this.session, op)
@@ -378,30 +431,36 @@ export class AcpSessionAgent implements Agent {
       for (const op of projector.finish(aborted ? 'aborted' : 'completed')) appendOp(this.session, op)
     } catch (error: unknown) {
       const aborted = signal.aborted
-      if (error instanceof MissingCliError) {
-        appendOp(this.session, {
-          type: 'assistant/chunk',
-          data: {
-            turn,
-            step,
-            chunk: { type: 'text-delta', index: 0, text: error.message },
-          },
-        })
-        projector.noteAssistantText(error.message)
-        for (const op of projector.finish('error', { message: error.message, code: error.code })) {
-          appendOp(this.session, op)
+      this.reportDriverFailure(aborted ? 'turn aborted' : 'turn', error)
+      try {
+        if (error instanceof MissingCliError && stepped) {
+          appendOp(this.session, {
+            type: 'assistant/chunk',
+            data: {
+              turn,
+              step,
+              chunk: { type: 'text-delta', index: 0, text: error.message },
+            },
+          })
+          projector.noteAssistantText(error.message)
+          for (const op of projector.finish('error', { message: error.message, code: error.code })) {
+            appendOp(this.session, op)
+          }
+          return false
         }
-        return false
-      }
-      const message = error instanceof Error ? error.message : String(error)
-      if (!aborted) {
-        this.loopCtx.logger.warn(`lumine-acp-session: turn failed: ${message}`)
-      }
-      for (const op of projector.finish(
-        aborted ? 'aborted' : 'error',
-        aborted ? undefined : { message, code: 'ACP_TURN' },
-      )) {
-        appendOp(this.session, op)
+        const { message } = describeError(error)
+        const close = stepped
+          ? projector.finish(
+            aborted ? 'aborted' : 'error',
+            aborted ? undefined : { message, code: 'ACP_TURN' },
+          )
+          : projector.closeTurn(
+            aborted ? 'aborted' : 'error',
+            aborted ? undefined : { message, code: 'ACP_TURN' },
+          )
+        for (const op of close) appendOp(this.session, op)
+      } catch (closeError: unknown) {
+        this.reportDriverFailure('turn close', closeError)
       }
       if (aborted) throw error
     }
