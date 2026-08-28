@@ -26,8 +26,8 @@ describe('ACP bundle cordis overlay', () => {
       expect(source).toMatch(/id:\s*directory-picker[\s\S]*disabled:\s*true/)
 
       expect(source).toMatch(/id:\s*llm-deepseek[\s\S]*disabled:\s*true/)
-      expect(source).not.toMatch(/DEEPSEEK_API_KEY/)
-      expect(source).not.toMatch(/\.credentials\.yaml/)
+      expect(source).not.toMatch(/apiKeyEnv:\s*DEEPSEEK_API_KEY/)
+      expect(source).not.toMatch(/credentials\.set/)
     }
   })
 })
