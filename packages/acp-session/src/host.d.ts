@@ -9,6 +9,19 @@ declare module '@deepseek-ai/cordis' {
     logger: { warn(...args: unknown[]): void; info(...args: unknown[]): void; error(...args: unknown[]): void }
     agents: import('@deepseek-ai/dsh-agent').AgentRegistry
     sessions: import('@deepseek-ai/dsh-session').SessionStore
+    llm: {
+      registerAdapter(providers: string[], adapter: unknown): {
+        (): void
+        replace(providers: string[]): void
+      }
+      listProviders(): Array<{ id: string; name: string }>
+      listModels(provider: string): Promise<Array<{ provider: string; id: string; name: string; description?: string }>>
+      resolveCallConfig(config: { provider: string; model: string; reasoningEffort?: string }): Promise<{
+        provider: string
+        model: string
+        reasoningEffort?: string
+      }>
+    }
     approval?: import('@deepseek-ai/dsh-user-approval').ApprovalService
     agent?: import('@deepseek-ai/dsh-agent').Agent
     get<T = unknown>(name: string): T | undefined

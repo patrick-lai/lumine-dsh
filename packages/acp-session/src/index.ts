@@ -14,7 +14,7 @@ import { LumineAcpFactory } from './factory.ts'
 import { installPickerPresets } from './presets.ts'
 
 export const name = 'lumine-acp-session'
-export const inject = ['agents', 'sessions']
+export const inject = ['agents', 'sessions', 'llm']
 
 export type { Config, PermissionMode, ProviderOverride } from './config.ts'
 export { resolveConfig } from './config.ts'
@@ -28,6 +28,15 @@ export {
 } from './providers.ts'
 export type { ProviderId, ResolvedLaunch } from './providers.ts'
 export { TurnProjector, lastBoundAcpSession, userMessageText } from './events.ts'
+export {
+  AcpCatalogAdapter,
+  AcpCatalogRegistry,
+  fallbackCatalog,
+  lastModelSelection,
+  pickerSnapshot,
+  projectAcpModels,
+} from './models.ts'
+export type { CatalogModel, HostModelSelection, ProjectedCatalog } from './models.ts'
 
 export function apply(ctx: Context, config: Config = {}): void {
   try {

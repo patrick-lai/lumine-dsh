@@ -51,11 +51,13 @@ ACP sessions do not need a DeepSeek API key. The official adapter's schema defau
 
 Community pattern: `dsh-loop-dock`. v1 is an ACP-only profile (DeepSeek-native sessions in the same process would register as a loop-dock driver later).
 
-Creation copies DSH's transaction: `sessions.prepare` → construct Agent → `setup(agentCtx)` → `sessions.enter` → disposer → `sessions.announce` → `agents.enter` → `agents.announce` → `agent/session-start` → start driver.
+Creation copies DSH's transaction: `sessions.prepare` → construct Agent → `setup(agentCtx)` → start the official ACP child → `sessions.enter` → disposer → `sessions.announce` → `agents.enter` → `agents.announce` → `agent/session-start`.
+
+The web composer picker reads host-wide `session.models` (`ctx.llm.listProviders` / `listModels`) plus the session's `model/selection`. ACP agents advertise models as session config options (`session/new` `configOptions`, `session/set_config_option`, `config_option_update`) — not through DeepSeek's adapter. This plugin registers a **catalog-only** `LlmAdapter` for the session's product (`grok` / `cursor` / `claude` / `codex`) so `routable` is true and the picker lists that product's models. `stream()` throws; generation stays on the official child. `session.selectModel` appends `model/selection` and is mirrored to `session/set_config_option`.
 
 The Web UI picker is **agent presets**. On load we copy four presets into `$DSH_HOME/.agent-presets` (`claude-code`, `codex`, `cursor`, `grok-build`). Those compositions mount **no** DSH bash/fs/web tools — the child owns tools.
 
-Each user message is ACP `session/prompt`. `session/update` folds into DSH's append-only session log (`turn/start`, `user/message`, `assistant/chunk`, `tool/call`, `tool/result`, `assistant/message`, `turn/end`). Cancel is `session/cancel`. One long-lived CLI child per DSH session (`session/load` on resume). The official ACP session id is stored on the synthetic `request/context` row (`acpSessionId`) — DSH persistence refuses unknown event types on load, so a custom `lumine-acp/bound` type would break resume after restart.
+The official child starts when the session is created (not on the first send) so the picker already has that product's models. Each user message is ACP `session/prompt`. `session/update` folds into DSH's append-only session log (`turn/start`, `user/message`, `assistant/chunk`, `tool/call`, `tool/result`, `assistant/message`, `turn/end`). Cancel is `session/cancel`. One long-lived CLI child per DSH session (`session/load` on resume). The official ACP session id is stored on the synthetic `request/context` row (`acpSessionId`) — DSH persistence refuses unknown event types on load, so a custom `lumine-acp/bound` type would break resume after restart.
 
 ## Install
 

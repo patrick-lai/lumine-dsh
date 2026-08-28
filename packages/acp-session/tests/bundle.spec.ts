@@ -13,4 +13,13 @@ describe('built loader entry', () => {
     expect(cordisImport?.[1]).not.toMatch(/\bFiberState\b/)
     expect(cordisImport?.[1]).toMatch(/\bService\b/)
   })
+
+  it('does not value-import LlmAdapter; generation stays on the ACP child', () => {
+    const built = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8')
+    expect(built).not.toMatch(
+      /import\s*\{[^}]*\bLlmAdapter\b[^}]*\}\s*from\s*["']@deepseek-ai\/dsh-llm["']/,
+    )
+    expect(built).toMatch(/session\/set_config_option/)
+    expect(built).toMatch(/does not generate/)
+  })
 })

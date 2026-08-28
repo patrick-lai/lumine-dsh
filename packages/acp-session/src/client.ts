@@ -1,10 +1,15 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { PermissionMode } from './config.ts'
 import type { AcpUpdate } from './events.ts'
+import {
+  collectConfigOptions,
+  projectAcpModels,
+  type ProjectedCatalog,
+} from './models.ts'
 import { decidePermission } from './permission.ts'
 import { spawnOfficial, type SpawnedChild } from './process.ts'
-import type { ResolvedLaunch } from './providers.ts'
-import { NdjsonRpc } from './rpc.ts'
+import type { ProviderId, ResolvedLaunch } from './providers.ts'
+import { AcpRpcError, NdjsonRpc } from './rpc.ts'
 
 export interface AcpPromptBlock {
   type: 'text'
@@ -34,11 +39,37 @@ export class AcpChild {
   private rpc: NdjsonRpc | undefined
   private spawned: SpawnedChild | undefined
   private sessionId: string | undefined
+  private configPayload: unknown = undefined
 
   constructor(private readonly options: AcpChildOptions) {}
 
   get acpSessionId(): string | undefined {
     return this.sessionId
+  }
+
+  /** Last config-option payload from initialize / session/new|load / updates. */
+  get configOptions(): unknown[] {
+    return collectConfigOptions(this.configPayload)
+  }
+
+  projectCatalog(provider: ProviderId): ProjectedCatalog {
+    return projectAcpModels(provider, this.configPayload)
+  }
+
+  onUpdate: ((update: AcpUpdate) => void) | undefined
+  onConfigOptions: ((payload: unknown) => void) | undefined
+
+  private ingestConfigPayload(payload: unknown): void {
+    const options = collectConfigOptions(payload)
+    const record = payload !== null && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : undefined
+    const hasLegacy = record !== undefined && (
+      record.models !== undefined || record.availableModels !== undefined || record.currentModelId !== undefined
+    )
+    if (options.length === 0 && !hasLegacy) return
+    this.configPayload = payload
+    this.onConfigOptions?.(payload)
   }
 
   async ensure(): Promise<string> {
@@ -49,7 +80,11 @@ export class AcpChild {
     this.rpc = rpc
 
     rpc.onNotification('session/update', params => {
-      this.onUpdate?.((params as { update?: AcpUpdate }).update ?? params as AcpUpdate)
+      const update = (params as { update?: AcpUpdate }).update ?? params as AcpUpdate
+      if (update.sessionUpdate === 'config_option_update') {
+        this.ingestConfigPayload(update)
+      }
+      this.onUpdate?.(update)
     })
     rpc.onRequest('session/request_permission', async params => {
       return decidePermission(params as Parameters<typeof decidePermission>[0], {
@@ -64,9 +99,14 @@ export class AcpChild {
 
     const init = await rpc.request('initialize', {
       protocolVersion: 1,
-      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+      clientCapabilities: {
+        fs: { readTextFile: false, writeTextFile: false },
+        terminal: false,
+        session: { configOptions: { boolean: {} } },
+      },
       clientInfo: { name: 'lumine-dsh-acp-session', version: '0.1.0' },
     }) as InitializeResult
+    this.ingestConfigPayload(init)
     const wanted = this.options.launch.authMethod
     const methods = init.authMethods ?? []
     if (wanted && methods.some(method => method.id === wanted)) {
@@ -75,11 +115,12 @@ export class AcpChild {
 
     if (this.options.resumeSessionId) {
       try {
-        await rpc.request('session/load', {
+        const loaded = await rpc.request('session/load', {
           sessionId: this.options.resumeSessionId,
           cwd: this.options.cwd,
           mcpServers: [],
         })
+        this.ingestConfigPayload(loaded)
         this.sessionId = this.options.resumeSessionId
         return this.sessionId
       } catch {
@@ -91,6 +132,7 @@ export class AcpChild {
       cwd: this.options.cwd,
       mcpServers: [],
     }) as { sessionId?: unknown }
+    this.ingestConfigPayload(created)
     if (typeof created.sessionId !== 'string' || !created.sessionId) {
       throw new Error('ACP child published without a session id')
     }
@@ -98,7 +140,44 @@ export class AcpChild {
     return this.sessionId
   }
 
-  onUpdate: ((update: AcpUpdate) => void) | undefined
+  /**
+   * Map a host picker choice onto ACP `session/set_config_option`.
+   * Falls back to the removed `session/set_model` only when the child lacks
+   * the stable method.
+   */
+  async setConfigOption(configId: string, value: string): Promise<unknown> {
+    const sessionId = await this.ensure()
+    const rpc = this.rpc
+    if (rpc === undefined) throw new Error('ACP RPC missing after ensure()')
+    try {
+      const result = await rpc.request('session/set_config_option', {
+        sessionId,
+        configId,
+        value,
+      })
+      this.ingestConfigPayload(result)
+      return result
+    } catch (error: unknown) {
+      if (!(error instanceof AcpRpcError) || error.rpcCode !== -32601) throw error
+      const result = await rpc.request('session/set_model', {
+        sessionId,
+        modelId: value,
+      })
+      this.ingestConfigPayload(result)
+      return result
+    }
+  }
+
+  async applyHostSelection(provider: ProviderId, selection: { model: string; reasoningEffort?: string }): Promise<void> {
+    const catalog = this.projectCatalog(provider)
+    if (selection.model && selection.model !== catalog.currentModel) {
+      await this.setConfigOption(catalog.modelConfigId, selection.model)
+    }
+    const next = this.projectCatalog(provider)
+    if (selection.reasoningEffort && next.reasoning && selection.reasoningEffort !== next.reasoning.current) {
+      await this.setConfigOption(next.reasoning.configId, selection.reasoningEffort)
+    }
+  }
 
   async prompt(prompt: AcpPromptBlock[], signal?: AbortSignal): Promise<{ stopReason?: string }> {
     const sessionId = await this.ensure()

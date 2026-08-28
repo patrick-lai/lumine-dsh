@@ -3,6 +3,18 @@ import type { Readable, Writable } from 'node:stream'
 
 export type JsonRpcId = number | string
 
+/** JSON-RPC error from the ACP child, with the numeric code intact. */
+export class AcpRpcError extends Error {
+  constructor(
+    readonly rpcCode: number,
+    message: string,
+    readonly data?: unknown,
+  ) {
+    super(message)
+    this.name = 'AcpRpcError'
+  }
+}
+
 export interface JsonRpcRequest {
   jsonrpc: '2.0'
   id?: JsonRpcId
@@ -91,7 +103,11 @@ export class NdjsonRpc {
       if (!waiter) return
       this.pending.delete(message.id)
       if (message.error) {
-        waiter.reject(new Error(message.error.message))
+        waiter.reject(new AcpRpcError(
+          message.error.code,
+          message.error.message,
+          message.error.data,
+        ))
         return
       }
       waiter.resolve(message.result)

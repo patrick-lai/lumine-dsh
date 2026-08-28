@@ -14,6 +14,7 @@ import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { SessionPreparation } from '@deepseek-ai/dsh-session'
 import { AcpSessionAgent } from './agent.ts'
 import type { ResolvedConfig } from './config.ts'
+import { AcpCatalogRegistry } from './models.ts'
 import { resolveProviderId, type ProviderId } from './providers.ts'
 
 // @deepseek-ai/cordis exports `const enum FiberState` (PENDING=0 … UNLOADING=5).
@@ -109,15 +110,17 @@ async function raceAbortCall<T>(
 }
 
 export class LumineAcpFactory extends Service implements AgentFactory {
-  static inject = ['agents', 'sessions']
+  static inject = ['agents', 'sessions', 'llm']
 
   private readonly ownership: FactoryOwnership
   private readonly runtime: { ctx: Context }
+  private readonly catalog: AcpCatalogRegistry
 
   constructor(ctx: Context, readonly resolved: ResolvedConfig) {
     super(ctx, 'lumineAcpSession')
     this.ownership = new FactoryOwnership(ctx.fiber)
     this.runtime = { ctx }
+    this.catalog = new AcpCatalogRegistry(ctx.get('llm') as ConstructorParameters<typeof AcpCatalogRegistry>[0])
     ctx.effect(() => () => this.ownership.dispose(), 'lumineAcpSession.transactions()')
     ctx.effect(() => ctx.agents.setFactory(this), 'lumineAcpSession.setFactory()')
   }
@@ -213,6 +216,7 @@ export class LumineAcpFactory extends Service implements AgentFactory {
         session,
         provider,
         this.resolved,
+        this.catalog,
       )
       machineReady.resolve()
       assertLive()
@@ -229,8 +233,6 @@ export class LumineAcpFactory extends Service implements AgentFactory {
           assertLive()
           emitAgentEvent(this.runtime.ctx, agent, 'agent/session-start', { source })
           assertLive()
-          // Same as dsh-agent-loop: the machine is live after session-start.
-          // The ACP child starts on the first followup() / whenIdle() wake.
           return { agent, dispose }
         },
         dispose,
@@ -257,6 +259,7 @@ export class LumineAcpFactory extends Service implements AgentFactory {
     try {
       const setupCommit = await raceAbort(setup?.(prepared.agent.ctx), prepared.signal, id)
       setupCommit?.commit()
+      await raceAbort(prepared.agent.bindOfficialChild(), prepared.signal, id)
       return prepared.publish(source)
     } catch (error: unknown) {
       await prepared.dispose()

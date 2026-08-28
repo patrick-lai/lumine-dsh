@@ -20,6 +20,15 @@ import {
   userMessageText,
   type LogOp,
 } from './events.ts'
+import {
+  fallbackCatalog,
+  lastModelSelection,
+  projectAcpModels,
+  selectionEquals,
+  type AcpCatalogRegistry,
+  type HostModelSelection,
+  type ProjectedCatalog,
+} from './models.ts'
 import { MissingCliError, resolveLaunch, type ProviderId } from './providers.ts'
 
 type Phase =
@@ -52,6 +61,8 @@ export class AcpSessionAgent implements Agent {
   private activityDone: Promise<void> = Promise.resolve()
   private child: AcpChild | undefined
   private headerLogged = false
+  private lastWrittenSelection: HostModelSelection | undefined
+  private bound = false
 
   constructor(
     private readonly loopCtx: Context,
@@ -60,6 +71,7 @@ export class AcpSessionAgent implements Agent {
     readonly session: Session,
     readonly provider: ProviderId,
     private readonly config: ResolvedConfig,
+    private readonly catalog: AcpCatalogRegistry,
   ) {
     this.inbox = new Inbox(session, {
       inserted: () => {},
@@ -69,6 +81,106 @@ export class AcpSessionAgent implements Agent {
     this.phase = { kind: 'idle', lastTurn: nextTurnNumber(session) - 1 }
     this.scope = createScope(loopCtx, this)
     this.ctx = this.scope.ctx.extend({ agent: this })
+    this.interceptSelectionWrites()
+    this.loopCtx.on('session/event', (subject, event) => {
+      const session = subject as Session
+      const row = event as { type?: string; data?: unknown }
+      if (session.id !== this.session.id) return
+      if (row.type !== 'model/selection') return
+      this.noteHostSelection(row.data as HostModelSelection)
+    })
+  }
+
+  private interceptSelectionWrites(): void {
+    const session = this.session
+    const append = session.append.bind(session)
+    const intercepted = ((type: string, data: unknown, opts?: Parameters<Session['append']>[2]) => {
+      const event = opts === undefined ? append(type, data) : append(type, data, opts)
+      if (type === 'model/selection') this.noteHostSelection(data as HostModelSelection)
+      return event
+    }) as Session['append']
+    try {
+      Object.defineProperty(session, 'append', { configurable: true, value: intercepted })
+    } catch {
+      // Frozen Session objects still notify via session/event.
+    }
+  }
+
+  private noteHostSelection(incoming: HostModelSelection | undefined): void {
+    if (!incoming || selectionEquals(this.lastWrittenSelection, incoming)) return
+    this.lastWrittenSelection = incoming
+    void this.mirrorHostSelection(incoming)
+  }
+
+  private currentCatalog(): ProjectedCatalog {
+    return this.catalog.adapter.projected(this.provider) ?? fallbackCatalog(this.provider)
+  }
+
+  private currentRoute(): { provider: ProviderId; model: string } {
+    const selected = lastModelSelection(this.session.events)
+    if (selected?.provider === this.provider) {
+      return { provider: this.provider, model: selected.model }
+    }
+    return { provider: this.provider, model: this.currentCatalog().currentModel }
+  }
+
+  private writeSelection(catalog: ProjectedCatalog): void {
+    const next: HostModelSelection = {
+      provider: catalog.provider,
+      model: catalog.currentModel,
+      ...catalog.reasoning?.current === undefined ? {} : { reasoningEffort: catalog.reasoning.current },
+    }
+    if (selectionEquals(lastModelSelection(this.session.events), next)) return
+    this.lastWrittenSelection = next
+    this.session.append('model/selection', next)
+  }
+
+  private publishCatalog(catalog: ProjectedCatalog): void {
+    this.catalog.publish(catalog)
+    this.writeSelection(catalog)
+  }
+
+  private async mirrorHostSelection(selection: HostModelSelection | undefined): Promise<void> {
+    if (!selection || selection.provider !== this.provider) return
+    const child = this.child
+    if (child === undefined) return
+    try {
+      await child.applyHostSelection(this.provider, selection)
+      this.catalog.publish(child.projectCatalog(this.provider))
+    } catch (error: unknown) {
+      this.loopCtx.logger.warn(
+        `lumine-acp-session: session/set_config_option failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
+
+  /**
+   * Start the official CLI at session create so the web picker sees this
+   * product's models before the first prompt.
+   */
+  async bindOfficialChild(): Promise<void> {
+    if (this.bound) return
+    this.bound = true
+    this.publishCatalog(fallbackCatalog(this.provider))
+    try {
+      const child = await this.ensureChild()
+      child.onConfigOptions = (payload) => {
+        this.catalog.publish(projectAcpModels(this.provider, payload))
+      }
+      const sessionId = await child.ensure()
+      this.publishCatalog(child.projectCatalog(this.provider))
+      if (!lastBoundAcpSession(this.session.events)) {
+        const route = this.currentRoute()
+        this.session.append('request/context', {
+          provider: route.provider,
+          model: route.model,
+          acpSessionId: sessionId,
+        })
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.loopCtx.logger.warn(`lumine-acp-session: official CLI not ready at session start: ${message}`)
+    }
   }
 
   get status(): AgentStatus {
@@ -192,6 +304,9 @@ export class AcpSessionAgent implements Agent {
       approval: this.loopCtx.get('approval') ?? undefined,
       resumeSessionId: lastBoundAcpSession(this.session.events),
     })
+    child.onConfigOptions = (payload) => {
+      this.catalog.publish(projectAcpModels(this.provider, payload))
+    }
     this.child = child
     return child
   }
@@ -207,10 +322,7 @@ export class AcpSessionAgent implements Agent {
     const step = 1
     phase.turn = turn
     phase.step = step
-    const route = {
-      provider: this.provider,
-      model: this.options.model ?? this.provider,
-    }
+    const route = this.currentRoute()
     const projector = new TurnProjector(turn, step, route)
     const user = claimed[0]
 
