@@ -19,11 +19,11 @@ import { installPickerPresets } from './presets.ts'
 
 export const name = 'lumine-acp-session'
 /**
- * Plugin-root inject. Factory `static inject` is the child-setup fiber
- * (`createScope` inherits the minter). Both must list `systemPrompt` —
- * nested Cordis inject is exclusive (r9 path C).
+ * Plugin-root inject. Must match `LumineAcpFactory.static inject` and
+ * official `dsh-agent-loop`: nested inject is exclusive; `createScope`
+ * inherits only the factory list.
  */
-export const inject = ['agents', 'sessions', 'llm', 'systemPrompt']
+export const inject = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt']
 
 export type { Config, PermissionMode, ProviderOverride } from './config.ts'
 export { resolveConfig } from './config.ts'

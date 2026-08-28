@@ -9,20 +9,25 @@ vi.mock('../src/presets.ts', () => ({
   installPickerPresets: () => '/tmp/presets',
 }))
 
-describe('ACP factory inject includes systemPrompt (path C)', () => {
-  it('plugin-root inject is agents, sessions, llm, plus systemPrompt', async () => {
+const OFFICIAL_AGENT_LOOP_INJECT = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt']
+
+describe('ACP factory inject matches official dsh-agent-loop', () => {
+  it('plugin-root inject is the official five-name list', async () => {
     const { inject } = await import('../src/plugin.ts')
-    expect(inject).toEqual(['agents', 'sessions', 'llm', 'systemPrompt'])
+    expect(inject).toEqual(OFFICIAL_AGENT_LOOP_INJECT)
   })
 
-  it('factory static inject in source lists the same systemPrompt grant', () => {
+  it('factory static inject in source matches official agent-loop exactly', () => {
     const factory = readFileSync(new URL('../src/factory.ts', import.meta.url), 'utf8')
-    expect(factory).toMatch(/static inject = \['agents', 'sessions', 'llm', 'systemPrompt'\]/)
-    expect(factory).not.toMatch(/static inject = \['agents', 'sessions', 'llm'\]\s*$/m)
+    expect(factory).toMatch(
+      /static inject = \['agents', 'sessions', 'llm', 'tools', 'systemPrompt'\]/,
+    )
   })
 
-  it('omitting systemPrompt is the r9 factory fiber that threw', async () => {
+  it('omitting tools is the r10 factory fiber that threw', async () => {
     const { inject } = await import('../src/plugin.ts')
-    expect(inject).not.toEqual(['agents', 'sessions', 'llm'])
+    expect(inject).not.toEqual(['agents', 'sessions', 'llm', 'systemPrompt'])
+    expect(inject).toContain('tools')
+    expect(inject).toContain('systemPrompt')
   })
 })
