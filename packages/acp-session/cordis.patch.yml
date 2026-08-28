@@ -11,6 +11,12 @@
 - id: agent-loop
   disabled: true
 
+# Host-plane driver from dsh-base. An agent-preset disable cannot unmount it.
+# dump-config for this ACP factory must show the driver absent so harvest
+# mounts instead of sitting beside a looping host driver.
+- id: goal-round-driver
+  disabled: true
+
 - insert:
     - id: lumine-acp-session
       name: '@lumine/dsh-acp-session'

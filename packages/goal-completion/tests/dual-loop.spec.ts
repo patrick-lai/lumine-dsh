@@ -111,6 +111,55 @@ describe('ACP harvest mounts instead of the goal-round-driver on lumine presets'
     expect(ctx.goals.complete).not.toHaveBeenCalled()
   })
 
+  it('apply() on grok-build pins PINNED GOAL on create and certifies GOAL REACHED', async () => {
+    const goal = makeGoal()
+    const followups: unknown[] = []
+    const session = makeSession(acpLog('Wrote pong.\nGOAL REACHED: file is exactly pong'))
+    const agent = makeAgent(session, followups)
+    const listeners = new Map<string, Array<(...args: unknown[]) => unknown>>()
+    const complete = vi.fn((nextAgent, ref) => {
+      goal.phase = 'complete'
+      return { ...goal, ...ref, phase: 'complete' as const }
+    })
+    const ctx = {
+      logger: { warn() {}, info() {}, error() {} },
+      goals: {
+        get: () => goal,
+        complete,
+        block: vi.fn(),
+        disarm: vi.fn(() => {
+          goal.activation = 'disarmed'
+          return goal
+        }),
+      },
+      agents: { get: () => agent },
+      inject(_deps: string[], callback: (inner: typeof ctx) => void) {
+        callback(ctx)
+        return { dispose() {} }
+      },
+      on(event: string, listener: (...args: unknown[]) => unknown) {
+        const bucket = listeners.get(event) ?? []
+        bucket.push(listener)
+        listeners.set(event, bucket)
+        return () => {}
+      },
+    }
+    apply(ctx as never, { judge: fakeJudge('APPROVED', 'file is exactly pong'), timeoutMs: 50 })
+
+    for (const listener of listeners.get('goal/changed') ?? []) {
+      listener({ agent, operation: 'create' })
+    }
+    expect(followups.some(item => String((item as { content?: Array<{ text?: string }> })?.content?.[0]?.text ?? '').includes('PINNED GOAL'))).toBe(true)
+    expect(ctx.goals.disarm).toHaveBeenCalledOnce()
+
+    for (const listener of listeners.get('session/event') ?? []) {
+      await listener(session, session.events.find(event => event.type === 'turn/end'))
+    }
+    expect(complete).toHaveBeenCalledOnce()
+    expect(complete).toHaveBeenCalledWith(agent, { id: 'goal-1', revision: 1 })
+    expect(goal.phase).toBe('complete')
+  })
+
   it('apply() does not harvest markers on a DeepSeek-native session', async () => {
     const followups: unknown[] = []
     const session = makeSession(nativeLog('GOAL REACHED: native should not harvest'), 'standard')

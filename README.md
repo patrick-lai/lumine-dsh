@@ -5,7 +5,7 @@ Lumine capabilities as [DeepSeek Harness](https://github.com/deepseek-ai/deepsee
 **Today that is two plugins:**
 
 - `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
-- `@lumine/dsh-goal-completion` — the deferred DSH completion policy layer. A worker `update_goal` complete (or an ACP `GOAL REACHED` marker) is only a candidate until an isolated judge outputs `GOAL COMPLETION VERDICT: APPROVED`. Human `/goal` and RPC `goal.complete` stay operator-authoritative. Marker harvest + hidden continue nudges mount **instead of** `dsh-goal-round-driver` on lumine ACP presets (`grok-build`, `claude-code`, `codex`, `cursor`).
+- `@lumine/dsh-goal-completion` — the deferred DSH completion policy layer. A worker `update_goal` complete (or an ACP `GOAL REACHED` marker) is only a candidate until an isolated judge outputs `GOAL COMPLETION VERDICT: APPROVED`. Human `/goal` and RPC `goal.complete` stay operator-authoritative. This bundle disables host-plane `goal-round-driver` (the stock dsh-base row) so `dsh --dump-config` shows it absent from the mounted set; marker harvest owns continue on lumine ACP presets.
 
 Keyword for discovery: `dsh-plugin`.
 

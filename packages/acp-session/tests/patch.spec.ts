@@ -12,6 +12,7 @@ describe('ACP bundle cordis overlay', () => {
   it('replaces agent-loop with the ACP factory and does not demand a DeepSeek key', () => {
     for (const source of [root, pkg]) {
       expect(source).toMatch(/id:\s*agent-loop[\s\S]*disabled:\s*true/)
+      expect(source).toMatch(/id:\s*goal-round-driver[\s\n]+(?:name:[^\n]+\n)?[ ]*disabled:\s*true/)
       expect(source).toMatch(/id:\s*lumine-acp-session/)
       expect(source).toMatch(/name:\s*'@lumine\/dsh-acp-session'/)
       expect(source).not.toMatch(/id:\s*llm-deepseek[\s\S]*disabled:\s*true/)

@@ -127,7 +127,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       if (row?.type !== 'turn/end') return
       const agent = live.agents.get(session.id)
       if (agent === undefined) return
-      void fallbackFor(agent).onSettledTurn({
+      return fallbackFor(agent).onSettledTurn({
         agent,
         session,
         endKind: turnEndKind(row.data),
