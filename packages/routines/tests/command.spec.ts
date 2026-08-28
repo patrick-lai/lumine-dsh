@@ -14,6 +14,12 @@ describe('routine command grammar', () => {
       mode: 'cron',
     })
     expect(parseRoutineCommand('delete abc-1')).toEqual({ kind: 'delete', id: 'abc-1' })
+    expect(parseRoutineCommand('create morning -- Review the inbox --cron 0 9 * * 1-5 --grind')).toEqual({
+      kind: 'create',
+      title: 'morning',
+      prompt: 'Review the inbox',
+      extra: '--cron 0 9 * * 1-5 --grind',
+    })
   })
 
   it('renders prompt parameters without touching dsh-schedule tools', () => {

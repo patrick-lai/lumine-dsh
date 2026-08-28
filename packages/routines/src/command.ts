@@ -22,11 +22,15 @@ export function parseRoutineCommand(rawInput: string): RoutineCommand {
   const lower = (verb ?? '').toLowerCase()
   if (lower === 'create') {
     const body = input.slice(verb?.length ?? 0).trim()
-    const split = body.split(/\s+--\s+/)
-    const title = (split[0] ?? '').trim()
-    const prompt = (split[1] ?? '').trim()
+    const splitAt = body.search(/\s+--\s+/)
+    if (splitAt === -1) return { kind: 'help' }
+    const title = body.slice(0, splitAt).trim()
+    const rest = body.slice(splitAt).replace(/^\s+--\s+/, '')
+    const flagStart = rest.search(/\s+--(?:cron|every|grind|quiet)\b/)
+    const prompt = (flagStart === -1 ? rest : rest.slice(0, flagStart)).trim()
+    const extra = flagStart === -1 ? '' : rest.slice(flagStart).trim()
     if (!title || !prompt) return { kind: 'help' }
-    return { kind: 'create', title, prompt, extra: split.slice(2).join(' -- ') }
+    return { kind: 'create', title, prompt, extra }
   }
   const id = rest.join(' ').trim()
   if (lower === 'enable' && id) return { kind: 'enable', id, enabled: true }
