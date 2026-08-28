@@ -1,0 +1,34 @@
+# Lumine ACP bundle. Later layers win by id; ctx.agents.setFactory() is a unary slot.
+
+# Replace the default DeepSeek agent-loop so an official ACP product owns the session.
+- id: agent-loop
+  disabled: true
+
+- insert:
+    - id: lumine-acp-session
+      name: '@lumine/dsh-acp-session'
+      config:
+        permission: yolo
+        defaultProvider: claude
+
+# Pin the in-page browse directory picker. directory-picker-auto picks native on
+# darwin; a detached `dsh` never shows the macOS dialog, so "+ Add workspace"
+# appears to do nothing. Same-id name rewrite is not the seam — disable+insert.
+- id: directory-picker
+  name: '@deepseek-ai/dsh-host-directory-picker-auto'
+  disabled: true
+
+- insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: ui-directory-picker-browse
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+
+# Do not disable llm-deepseek. Empty apiKeyEnv already skips the key gate;
+# disabling the adapter left session.models.current on deepseek-official with
+# nothing serving it (groups empty, prompt refused). Keep the official adapter
+# mounted. This plugin's catalog adapter serves grok/claude/codex/cursor so
+# grok-build current is grok-4.6 and routable.
+#
+# Profile `cordis.patch.yml` must not re-insert directory-picker-browse — this
+# bundle already does. A second insert is a duplicate loader id.

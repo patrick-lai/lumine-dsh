@@ -1,0 +1,19 @@
+# One-by-one install of @lumine/dsh-acp-session. Factory only.
+#
+# The root lumine-dsh bundle already inserts directory-picker-browse. Do not
+# repeat that insert here — applying both patches (bundle + this package, or
+# bundle + a copied profile overlay) dies on a duplicate loader id.
+# If you install this package without the root bundle and need in-page browse,
+# copy the browse disable+insert rows from the repo-root cordis.patch.yml once.
+#
+# Do not disable llm-deepseek. Empty apiKeyEnv already skips the key gate.
+
+- id: agent-loop
+  disabled: true
+
+- insert:
+    - id: lumine-acp-session
+      name: '@lumine/dsh-acp-session'
+      config:
+        permission: yolo
+        defaultProvider: claude

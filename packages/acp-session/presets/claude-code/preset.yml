@@ -1,0 +1,3 @@
+name: Claude Code
+description: The session is Claude Code via the official CLI (stdio ACP). Bills your existing Claude subscription. No API key.
+order: 10

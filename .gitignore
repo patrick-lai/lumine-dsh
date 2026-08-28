@@ -1,0 +1,10 @@
+node_modules
+dist
+lib
+coverage
+*.log
+.DS_Store
+.pnpm-store
+.turbo
+.vitest
+*.tsbuildinfo
