@@ -21,7 +21,8 @@ import { agentScopedRoundDriverEnabled, isLumineAcpSession, turnEndKind } from '
 import { installToolsExecuteWrap } from './tools-wrap.ts'
 
 export const name = 'lumine-goal-completion'
-export const inject = ['goals']
+/** Cordis: `ctx.subagents` throws without this. Same consumer set as dsh-tool-subagent. */
+export const inject = ['goals', 'subagents', 'tools']
 
 export type { Config } from './config.ts'
 export { resolveConfig, DEFAULT_START_TIMEOUT_MS } from './config.ts'

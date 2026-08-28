@@ -76,7 +76,10 @@ export class AcpFallback {
     const notice = pluginNotice(pinDirective(objective), `pin: ${objective}`)
     if (typeof agent.inject === 'function') agent.inject(notice as never)
     else agent.followup(notice as never)
-    this.state(agent).pinned = true
+    const state = this.state(agent)
+    state.pinned = true
+    state.halted = false
+    state.lastVerdict = undefined
   }
 
   async onSettledTurn(input: SettledTurnInput): Promise<{
@@ -96,10 +99,12 @@ export class AcpFallback {
       return { action: 'ignore' }
     }
 
+    // A recorded verdict (APPROVED / REJECTED / UNVERIFIABLE) keeps harvest
+    // halted. An operator ping must not re-arm hidden continue.
+    if (state.halted) return { action: 'ignore' }
+
     const lastUser = lastUserSource(input.session.events)
     const operatorTurn = !isPluginNoticeSource(lastUser)
-    if (state.halted && !operatorTurn) return { action: 'ignore' }
-    if (operatorTurn) state.halted = false
 
     const reply = lastAssistantReply(input.session) ?? ''
     const marker = scanMarkers(reply)

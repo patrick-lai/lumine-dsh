@@ -248,4 +248,34 @@ describe('ACP marker harvest', () => {
     expect(third.nudge).toContain('auto-continue round 2')
     expect(fallback.state(agent).rounds).toBe(2)
   })
+
+  it('keeps harvest halted after UNVERIFIABLE; an operator ping does not re-arm continue', async () => {
+    const goal = makeGoal()
+    const followups: Array<{ content: Array<{ text?: string }> }> = []
+    const complete = vi.fn()
+    const fallback = createAcpFallback({
+      certifier: createCertifier({
+        judge: fakeJudge('UNVERIFIABLE', 'cannot get property "subagents" without inject'),
+        complete,
+        getGoal: () => goal,
+        timeoutMs: 1_000,
+        failClosed: true,
+      }),
+      goals: { get: () => goal, complete, block: vi.fn() },
+      sessionIsLumineAcp: true,
+      roundDriverPresent: false,
+    })
+    const reached = makeSession(acpLog('GOAL REACHED: file is exactly pong'))
+    const agent = makeAgent(reached, followups)
+    const first = await fallback.onSettledTurn({ agent, session: reached, endKind: 'completed' })
+    expect(first.action).toBe('halt')
+    expect(fallback.state(agent).halted).toBe(true)
+
+    const ping = makeSession(acpLog('status?', { kind: 'user' }))
+    const second = await fallback.onSettledTurn({ agent, session: ping, endKind: 'completed' })
+    expect(second.action).toBe('ignore')
+    expect(followups.filter(item => String(item.content[0]?.text ?? '').includes('auto-continue'))).toHaveLength(0)
+    expect(fallback.state(agent).halted).toBe(true)
+    expect(complete).not.toHaveBeenCalled()
+  })
 })

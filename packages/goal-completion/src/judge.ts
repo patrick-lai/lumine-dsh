@@ -90,9 +90,9 @@ function workerProduct(agent: { options?: { provider?: string }; session?: { hea
 }
 
 function availableProducts(ctx: Context): string[] {
-  const llm = ctx.llm
-  if (!llm?.listProviders) return []
   try {
+    const llm = ctx.llm
+    if (!llm?.listProviders) return []
     return llm.listProviders().map(entry => entry.id).filter(id => id && id !== 'deepseek' && id !== 'deepseek-official')
   } catch {
     return []
@@ -113,9 +113,9 @@ function isWriteTool(name: string): boolean {
 }
 
 function listToolNames(ctx: Context): string[] {
-  const tools = ctx.tools
-  if (!tools?.schemas) return []
   try {
+    const tools = ctx.tools
+    if (!tools?.schemas) return []
     return tools.schemas().map(entry => entry.name).filter((name): name is string => typeof name === 'string' && name.length > 0)
   } catch {
     return []
@@ -196,7 +196,11 @@ export function raceStart<T>(
  */
 function readSubagents(scope: { subagents?: Context['subagents']; get?: (name: string) => unknown } | undefined): Context['subagents'] {
   if (!scope) return undefined
-  if (scope.subagents) return scope.subagents
+  try {
+    if (scope.subagents) return scope.subagents
+  } catch {
+    // Cordis: `cannot get property "subagents" without inject`
+  }
   try {
     return scope.get?.('subagents') as Context['subagents']
   } catch {
