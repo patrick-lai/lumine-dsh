@@ -2,7 +2,10 @@
 
 Lumine capabilities as [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins. This repository is the install home: `dsh plugin --profile web add github:patrick-lai/lumine-dsh` gets everything. Packages inside can also be installed one-by-one later.
 
-**Today that is one plugin:** `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
+**Today that is two plugins:**
+
+- `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
+- `@lumine/dsh-routines` — host-owned durable automations (calendar cron/interval, quiet hours, overlap guard, catch-up-once). They sit **beside** official `@deepseek-ai/dsh-schedule`, which stays mounted as session-local reminders.
 
 Keyword for discovery: `dsh-plugin`.
 
@@ -33,6 +36,8 @@ So this plugin **replaces the Agent factory** and pins the in-page workspace pic
 - insert:
     - id: lumine-acp-session
       name: '@lumine/dsh-acp-session'
+    - id: lumine-routines
+      name: '@lumine/dsh-routines'
 - id: directory-picker
   name: '@deepseek-ai/dsh-host-directory-picker-auto'
   disabled: true
@@ -87,15 +92,37 @@ Local checkout:
 dsh plugin --profile web add link:/absolute/path/to/lumine-dsh
 ```
 
-A `link:` install loads `@lumine/dsh-acp-session` from its real path. Node will not see `@deepseek-ai/cordis` in the profile `node_modules` unless those peers are linked into `packages/acp-session/node_modules`. The package entry runs `ensureDshPeers()` (honors `DSH_HOME` / `DSH_PROFILE`) before importing the plugin; you can also run `node packages/acp-session/scripts/ensure-dsh-peers.mjs`.
+A `link:` install loads `@lumine/dsh-acp-session` and `@lumine/dsh-routines` from their real paths. Node will not see `@deepseek-ai/cordis` in the profile `node_modules` unless those peers are linked into each package `node_modules`. Each package entry runs `ensureDshPeers()` (honors `DSH_HOME` / `DSH_PROFILE`) before importing the plugin; you can also run `node packages/acp-session/scripts/ensure-dsh-peers.mjs` or `node packages/routines/scripts/ensure-dsh-peers.mjs`.
 
 One package only:
 
 ```sh
 dsh plugin --profile web add link:/absolute/path/to/lumine-dsh/packages/acp-session
+dsh plugin --profile web add link:/absolute/path/to/lumine-dsh/packages/routines
 ```
 
 Then `dsh --profile web`. New session → pick **Claude Code**, **Codex**, **Cursor**, or **Grok Build**.
+
+## Routines
+
+`@lumine/dsh-routines` is a host-plane store. A routine survives process restart and fires even when no chat is open. It is **not** `@deepseek-ai/dsh-schedule`. That official package is still mounted: session-local reminders (`after` / `at` / `every_seconds`) that deliver inside a live conversation, with no calendar cron, quiet hours, events, or spawn.
+
+Create one through RPC (same naming as DSH `goal.*`):
+
+```
+routine.create { title, promptTemplate, rule: { kind: 'cron', cron: '0 9 * * 1-5' }, mode: 'cron' }
+routine.list
+routine.enable { id, enabled: true }
+routine.runNow { id }
+```
+
+Or, when `dsh-commands` is composed, `/routine create morning-triage -- Review the inbox and write a 5-line brief.`
+
+`cron` delivery calls `agents.create` in the configured workspace (or the default workspace) with the `grok-build` preset, then `session.prompt` with the rendered template. It never steals an already-open operator session. `grind` is the same spawn plus a v1 hidden-continue loop with a ceiling — not Lumine board/swarm grind.
+
+State is stored via `ctx.storageDomain` when that service exists, otherwise `$DSH_HOME/lumine-routines/routines.json`. Never in the session event log.
+
+The package-only overlay (`packages/routines/cordis.patch.yml`) inserts this plugin only. It does not disable `agent-loop` (ACP session already does) and it does not re-insert `directory-picker-browse`.
 
 ## CLI prerequisites
 
@@ -145,6 +172,8 @@ lumine-dsh/                      # root bundle (dsh.bundle)
   packages/acp-session/          # @lumine/dsh-acp-session (dsh.bundle)
     src/                         # factory, ACP client, event map, command resolution
     presets/                     # four picker rows, no DSH tools
+  packages/routines/             # @lumine/dsh-routines (dsh.bundle)
+    src/                         # calendar, persist, RPC, timer, spawn
 ```
 
 ## Develop
