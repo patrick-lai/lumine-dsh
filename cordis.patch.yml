@@ -4,12 +4,30 @@
 - id: agent-loop
   disabled: true
 
+# Stock dsh-base mounts goal-round-driver on the HOST plane. Disabling it only
+# in a grok-build agent.cordis.yml does not unmount that host row — dump-config
+# still listed it and the driver looped ACP rounds. Same seam as agent-loop:
+# later layers win by id. Disabled = absent from the mounted set so lumine
+# ACP harvest owns continue on this bundle.
+- id: goal-round-driver
+  disabled: true
+
 - insert:
     - id: lumine-acp-session
       name: '@lumine/dsh-acp-session'
       config:
         permission: yolo
         defaultProvider: claude
+    # Deferred DSH completion policy. tools/execute around-hook certifies
+    # worker update_goal complete, then the original execute commits.
+    # ACP marker harvest mounts INSTEAD OF goal-round-driver on lumine ACP
+    # presets (those compositions disable the driver). Human /goal and RPC
+    # goal.complete stay operator-authoritative.
+    - id: lumine-goal-completion
+      name: '@lumine/dsh-goal-completion'
+      config:
+        timeoutMs: 900000
+        failClosed: true
     - id: lumine-routines
       name: '@lumine/dsh-routines'
       config:

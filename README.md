@@ -2,9 +2,10 @@
 
 Lumine capabilities as [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins. This repository is the install home: `dsh plugin --profile web add github:patrick-lai/lumine-dsh` gets everything. Packages inside can also be installed one-by-one later.
 
-**Today that is two plugins:**
+**Today that is three plugins:**
 
 - `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
+- `@lumine/dsh-goal-completion` — the deferred DSH completion policy layer. A worker `update_goal` complete (or an ACP `GOAL REACHED` marker) is only a candidate until an isolated judge outputs `GOAL COMPLETION VERDICT: APPROVED`. Human `/goal` and RPC `goal.complete` stay operator-authoritative. This bundle disables host-plane `goal-round-driver` (the stock dsh-base row) so `dsh --dump-config` shows it absent from the mounted set; marker harvest owns continue on lumine ACP presets.
 - `@lumine/dsh-routines` — host-owned durable automations (calendar cron/interval, quiet hours, overlap guard, catch-up-once). The model can create paused rows only; an operator arms them. They sit **beside** official `@deepseek-ai/dsh-schedule`, which stays mounted as session-local reminders.
 
 Keyword for discovery: `dsh-plugin`.
@@ -33,9 +34,13 @@ So this plugin **replaces the Agent factory** and pins the in-page workspace pic
 ```yaml
 - id: agent-loop
   disabled: true
+- id: goal-round-driver
+  disabled: true
 - insert:
     - id: lumine-acp-session
       name: '@lumine/dsh-acp-session'
+    - id: lumine-goal-completion
+      name: '@lumine/dsh-goal-completion'
     - id: lumine-routines
       name: '@lumine/dsh-routines'
 - id: directory-picker
@@ -92,12 +97,13 @@ Local checkout:
 dsh plugin --profile web add link:/absolute/path/to/lumine-dsh
 ```
 
-A `link:` install loads `@lumine/dsh-acp-session` and `@lumine/dsh-routines` from their real paths. Node will not see `@deepseek-ai/cordis` in the profile `node_modules` unless those peers are linked into each package `node_modules`. Each package entry runs `ensureDshPeers()` (honors `DSH_HOME` / `DSH_PROFILE`) before importing the plugin; you can also run `node packages/acp-session/scripts/ensure-dsh-peers.mjs` or `node packages/routines/scripts/ensure-dsh-peers.mjs`.
+A `link:` install loads `@lumine/dsh-acp-session`, `@lumine/dsh-goal-completion`, and `@lumine/dsh-routines` from their real paths. Node will not see `@deepseek-ai/cordis` in the profile `node_modules` unless those peers are linked into each package `node_modules`. Each package entry runs `ensureDshPeers()` (honors `DSH_HOME` / `DSH_PROFILE`) before importing the plugin; you can also run `node packages/acp-session/scripts/ensure-dsh-peers.mjs`, `node packages/goal-completion/scripts/ensure-dsh-peers.mjs`, or `node packages/routines/scripts/ensure-dsh-peers.mjs`.
 
 One package only:
 
 ```sh
 dsh plugin --profile web add link:/absolute/path/to/lumine-dsh/packages/acp-session
+dsh plugin --profile web add link:/absolute/path/to/lumine-dsh/packages/goal-completion
 dsh plugin --profile web add link:/absolute/path/to/lumine-dsh/packages/routines
 ```
 
@@ -144,6 +150,8 @@ A missing CLI fails with `Install X and log in`, not a stack trace.
 
 ## Config
 
+Root `cordis.patch.yml` also inserts `lumine-goal-completion` (`timeoutMs: 900000`, `failClosed: true`, optional `judgePreset`). In CI the judge is a fake that never approves. Generation of the runtime judge never writes a DeepSeek key.
+
 `cordis.patch.yml` / profile overlay on `id: lumine-acp-session`:
 
 ```yaml
@@ -175,9 +183,11 @@ lumine-dsh/                      # root bundle (dsh.bundle)
   packages/acp-session/          # @lumine/dsh-acp-session (dsh.bundle)
     src/                         # factory, ACP client, event map, command resolution
     presets/                     # four picker rows, no DSH tools
+  packages/goal-completion/      # @lumine/dsh-goal-completion (dsh.bundle)
+    src/                         # certifier, update_goal wrap, ACP marker fallback
   packages/routines/             # @lumine/dsh-routines (dsh.bundle + dsh.client)
     src/                         # calendar, persist, RPC, timer, spawn
-    src/client/                  # Settings → Routines section
+    src/client/                  # left-rail Routines pane
 ```
 
 ## Develop

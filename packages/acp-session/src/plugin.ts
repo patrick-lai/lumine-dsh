@@ -18,7 +18,12 @@ import { mountAcpCatalog } from './models.ts'
 import { installPickerPresets } from './presets.ts'
 
 export const name = 'lumine-acp-session'
-export const inject = ['agents', 'sessions', 'llm']
+/**
+ * Plugin-root inject. Must match `LumineAcpFactory.static inject` and
+ * official `dsh-agent-loop`: nested inject is exclusive; `createScope`
+ * inherits only the factory list.
+ */
+export const inject = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt']
 
 export type { Config, PermissionMode, ProviderOverride } from './config.ts'
 export { resolveConfig } from './config.ts'
