@@ -8,5 +8,6 @@ export default defineConfig({
   outDir: 'lib',
   platform: 'node',
   target: 'node22',
-  external: [/^@deepseek-ai\//],
+  fixedExtension: false,
+  deps: { neverBundle: [/^@deepseek-ai\//] },
 })

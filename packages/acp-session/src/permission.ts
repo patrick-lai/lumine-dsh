@@ -45,7 +45,7 @@ export async function decidePermission(
 ): Promise<PermissionDecision> {
   const offered = params.options ?? []
   const allowAlways = pick(offered, ['allow_always', 'allow-always'])
-  const allowOnce = pick(offered, ['allow_once', 'allow-once', 'allow_always', 'allow-always'])
+  const allowOnce = pick(offered, ['allow_once', 'allow-once'])
   const rejectOnce = pick(offered, ['reject_once', 'reject-once', 'reject_always', 'reject-always'])
 
   const allow = (): PermissionDecision => {

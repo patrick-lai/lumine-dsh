@@ -56,6 +56,7 @@ describe('TurnProjector ACP → DSH session log', () => {
       'assistant/chunk',
       'assistant/chunk',
       'assistant/chunk',
+      'assistant/chunk',
       'tool/call',
       'tool/result',
       'assistant/message',

@@ -35,9 +35,9 @@
     }
   },
   "scripts": {
-    "prepare": "tsdown --config tsdown.prepare.config.mjs",
-    "build": "tsdown --config tsdown.config.mjs",
-    "build:prepare": "tsdown --config tsdown.prepare.config.mjs",
+    "prepare": "tsdown --config tsdown.prepare.config.mjs --config-loader native",
+    "build": "tsdown --config tsdown.config.mjs --config-loader native",
+    "build:prepare": "tsdown --config tsdown.prepare.config.mjs --config-loader native",
     "test": "vitest run"
   },
   "dependencies": {
