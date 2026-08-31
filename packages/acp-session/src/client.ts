@@ -12,6 +12,7 @@ import {
 import { decidePermission } from './permission.ts'
 import { spawnOfficial, type SpawnedChild } from './process.ts'
 import type { ProviderId, ResolvedLaunch } from './providers.ts'
+import { leylineMcpServers } from './mcp.ts'
 import { AcpRpcError, NdjsonRpc } from './rpc.ts'
 
 export interface AcpPromptBlock {
@@ -152,7 +153,7 @@ export class AcpChild {
         const loaded = await this.requestWithAuthRetry('session/load', {
           sessionId: this.options.resumeSessionId,
           cwd: this.options.cwd,
-          mcpServers: [],
+          mcpServers: leylineMcpServers(),
         })
         this.ingestConfigPayload(loaded)
         this.sessionId = this.options.resumeSessionId
@@ -164,7 +165,7 @@ export class AcpChild {
 
     const created = await this.requestWithAuthRetry('session/new', {
       cwd: this.options.cwd,
-      mcpServers: [],
+      mcpServers: leylineMcpServers(),
     }) as { sessionId?: unknown }
     this.ingestConfigPayload(created)
     if (typeof created.sessionId !== 'string' || !created.sessionId) {

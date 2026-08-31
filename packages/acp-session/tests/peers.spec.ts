@@ -19,6 +19,7 @@ describe('DSH peer resolution for link: installs', () => {
     }, '/work')
     expect(roots).toContain('/dsh-home/profiles/web/node_modules')
     expect(roots).toContain('/dsh-home/profiles/node_modules')
+    expect(roots).toContain('/dsh-home/cli/node_modules')
     expect(roots).toContain('/extra/node_modules')
     expect(roots).toContain('/work/node_modules')
   })

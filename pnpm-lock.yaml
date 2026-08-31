@@ -20,6 +20,12 @@ importers:
       '@lumine/dsh-routines':
         specifier: file:packages/routines
         version: link:packages/routines
+      '@lumine/dsh-skills':
+        specifier: file:packages/skills
+        version: link:packages/skills
+      '@lumine/dsh-token-saver':
+        specifier: file:packages/token-saver
+        version: link:packages/token-saver
 
   packages/acp-session:
     dependencies:
@@ -70,6 +76,38 @@ importers:
         version: 3.2.7(@types/node@22.20.1)
 
   packages/routines:
+    dependencies:
+      tsdown:
+        specifier: ^0.22.14
+        version: 0.22.14(typescript@5.9.3)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.17.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.1)
+
+  packages/skills:
+    dependencies:
+      tsdown:
+        specifier: ^0.22.14
+        version: 0.22.14(typescript@5.9.3)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.17.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.1)
+
+  packages/token-saver:
     dependencies:
       tsdown:
         specifier: ^0.22.14

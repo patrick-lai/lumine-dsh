@@ -15,7 +15,7 @@ describe('built lumine-chat loader entry', () => {
     expect(client).toMatch(/@lumine\/dsh-chat/)
     expect(client).toMatch(/conversation\.chat\.node/)
     expect(client).toMatch(/tool-call/)
-    expect(client).toMatch(/tool\.call\.toolview/)
+    expect(client).toMatch(/priority:\s*-1/)
     expect(client).toMatch(/data-subcalls/)
     expect(client).toMatch(/aria-hidden/)
     expect(client).toMatch(/aria-label/)

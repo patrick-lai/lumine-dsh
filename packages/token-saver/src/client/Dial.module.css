@@ -1,0 +1,44 @@
+.dial {
+  display: inline-flex;
+  align-items: stretch;
+  box-sizing: border-box;
+  height: 28px;
+  overflow: hidden;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.option {
+  box-sizing: border-box;
+  min-width: 28px;
+  height: 28px;
+  margin: -1px 0;
+  padding: 0 7px;
+  border: 0;
+  border-left: 1px solid var(--dsw-alias-border-l2);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+.option:first-child {
+  border-left: 0;
+}
+
+.option:hover,
+.option[aria-pressed='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.option:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--dsw-alias-label-primary);
+  outline-offset: -2px;
+}

@@ -1,0 +1,74 @@
+{
+  "name": "@lumine/dsh-skills",
+  "version": "0.1.0",
+  "description": "Bundled Lumine skills and slash-command launchers for DeepSeek Harness.",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/client.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "skills",
+    "cordis.patch.yml",
+    "scripts",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "lumine",
+    "skills"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-connection"
+      ]
+    }
+  },
+  "scripts": {
+    "prepare": "tsdown --config tsdown.prepare.config.mjs --config-loader native && tsdown --config tsdown.client.config.mjs --config-loader native && (node scripts/ensure-dsh-peers.mjs || true)",
+    "build": "tsdown --config tsdown.config.mjs --config-loader native && tsdown --config tsdown.client.config.mjs --config-loader native",
+    "build:prepare": "tsdown --config tsdown.prepare.config.mjs --config-loader native && tsdown --config tsdown.client.config.mjs --config-loader native",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "tsdown": "^0.22.14"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-commands": "*",
+    "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/dsh-session": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": { "optional": true },
+    "@deepseek-ai/dsh-commands": { "optional": true },
+    "@deepseek-ai/dsh-llm": { "optional": true },
+    "@deepseek-ai/dsh-session": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "^22.17.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

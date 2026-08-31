@@ -12,6 +12,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { LeylineChromeService, WorktreeChromeService } from './chrome-rpc.ts'
 import { resolveConfig, type Config } from './config.ts'
 import { LumineAcpFactory } from './factory.ts'
 import { createLastModelsStore } from './last-models.ts'
@@ -98,6 +99,14 @@ export {
   providerOfPickerSession,
 } from './picker-gate.ts'
 export { LastModelsStore, createLastModelsStore, lastModelsPath, parseLastModels } from './last-models.ts'
+export { leylineMcpServers, LEYLINE_MCP_NAME, LEYLINE_MCP_ARGS } from './mcp.ts'
+export {
+  LeylineChromeService,
+  WorktreeChromeService,
+  boundWorktree,
+  leylineStatus,
+  listWorktrees,
+} from './chrome-rpc.ts'
 export { ensureDshPeers, DSH_PEERS } from './peers.ts'
 
 export function apply(ctx: Context, config: Config = {}): void {
@@ -115,6 +124,8 @@ export function apply(ctx: Context, config: Config = {}): void {
   const lastModels = createLastModelsStore()
   installSessionPickerGate(ctx as never, catalog, lastModels)
   ctx.plugin(LumineAcpFactory, { ...resolved, catalog, lastModels })
+  ctx.plugin(WorktreeChromeService)
+  ctx.plugin(LeylineChromeService)
 }
 
 export default {

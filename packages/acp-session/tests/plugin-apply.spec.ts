@@ -30,11 +30,13 @@ describe('plugin apply registers the catalog on the host llm', () => {
     apply(ctx as never)
 
     expect(llm.listProviders().map(entry => entry.id)).toEqual(['claude', 'codex', 'cursor', 'grok'])
-    expect(pluginConfigs).toHaveLength(1)
+    expect(pluginConfigs).toHaveLength(3)
     expect(pluginConfigs[0]).toMatchObject({
       defaultProvider: 'claude',
       permission: 'yolo',
     })
+    expect(pluginConfigs[1]).toBeUndefined()
+    expect(pluginConfigs[2]).toBeUndefined()
     const catalog = (pluginConfigs[0] as { catalog?: { adapter?: { projected: (id: string) => { provider?: string; currentModel?: string } | undefined } } }).catalog
       ?.adapter
     expect(catalog?.projected('grok')).toMatchObject({

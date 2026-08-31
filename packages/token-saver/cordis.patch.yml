@@ -1,0 +1,7 @@
+# One-by-one install of @lumine/dsh-token-saver. This plugin only.
+#
+# Do not disable agent-loop here. Do not re-insert directory-picker-browse.
+
+- insert:
+    - id: lumine-token-saver
+      name: '@lumine/dsh-token-saver'

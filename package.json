@@ -1,7 +1,7 @@
 {
   "name": "lumine-dsh",
   "version": "0.1.0",
-  "description": "Lumine capabilities as DeepSeek Harness plugins. ACP sessions for Claude Code, Codex, Cursor, and Grok Build, fail-closed /goal completion, host-owned durable routines, and Lumine inbuilt-chat tool grouping.",
+  "description": "Lumine capabilities as DeepSeek Harness plugins. ACP sessions for Claude Code, Codex, Cursor, and Grok Build, fail-closed /goal completion, host-owned durable routines, Lumine inbuilt-chat grouping, skills slash commands, leyline memory, and Token Saver.",
   "license": "MIT",
   "type": "module",
   "private": false,
@@ -22,7 +22,10 @@
     "codex",
     "cursor",
     "grok-build",
-    "routines"
+    "routines",
+    "leyline",
+    "token-saver",
+    "wayfinder"
   ],
   "files": [
     "cordis.patch.yml",
@@ -43,7 +46,16 @@
     "packages/routines/scripts",
     "packages/chat/package.json",
     "packages/chat/cordis.patch.yml",
-    "packages/chat/lib"
+    "packages/chat/lib",
+    "packages/skills/package.json",
+    "packages/skills/cordis.patch.yml",
+    "packages/skills/lib",
+    "packages/skills/skills",
+    "packages/skills/scripts",
+    "packages/token-saver/package.json",
+    "packages/token-saver/cordis.patch.yml",
+    "packages/token-saver/lib",
+    "packages/token-saver/scripts"
   ],
   "exports": {
     "./cordis.patch.yml": "./cordis.patch.yml",
@@ -55,14 +67,19 @@
     }
   },
   "scripts": {
-    "prepare": "pnpm --dir packages/acp-session run build:prepare && pnpm --dir packages/goal-completion run build:prepare && pnpm --dir packages/routines run build:prepare && pnpm --dir packages/chat run build:prepare",
-    "build": "pnpm --filter @lumine/dsh-acp-session --filter @lumine/dsh-goal-completion --filter @lumine/dsh-routines --filter @lumine/dsh-chat run build",
-    "test": "pnpm --filter @lumine/dsh-acp-session --filter @lumine/dsh-goal-completion --filter @lumine/dsh-routines --filter @lumine/dsh-chat run test"
+    "e2e": "node scripts/e2e/run.mjs",
+    "e2e:link": "node scripts/e2e/link.mjs",
+    "e2e:fresh": "node scripts/e2e/fresh.mjs",
+    "prepare": "pnpm --dir packages/acp-session run build:prepare && pnpm --dir packages/goal-completion run build:prepare && pnpm --dir packages/routines run build:prepare && pnpm --dir packages/chat run build:prepare && pnpm --dir packages/skills run build:prepare && pnpm --dir packages/token-saver run build:prepare",
+    "build": "pnpm --filter @lumine/dsh-acp-session --filter @lumine/dsh-goal-completion --filter @lumine/dsh-routines --filter @lumine/dsh-chat --filter @lumine/dsh-skills --filter @lumine/dsh-token-saver run build",
+    "test": "pnpm --filter @lumine/dsh-acp-session --filter @lumine/dsh-goal-completion --filter @lumine/dsh-routines --filter @lumine/dsh-chat --filter @lumine/dsh-skills --filter @lumine/dsh-token-saver run test"
   },
   "dependencies": {
     "@lumine/dsh-acp-session": "file:packages/acp-session",
     "@lumine/dsh-goal-completion": "file:packages/goal-completion",
     "@lumine/dsh-routines": "file:packages/routines",
-    "@lumine/dsh-chat": "file:packages/chat"
+    "@lumine/dsh-chat": "file:packages/chat",
+    "@lumine/dsh-skills": "file:packages/skills",
+    "@lumine/dsh-token-saver": "file:packages/token-saver"
   }
 }

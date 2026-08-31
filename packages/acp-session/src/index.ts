@@ -72,6 +72,13 @@ export const isJsonSafe = plugin.isJsonSafe
 export const nextTurnOf = plugin.nextTurnOf
 export const openTurnThenClaim = plugin.openTurnThenClaim
 export { ensureDshPeers }
+export const leylineMcpServers = plugin.leylineMcpServers
+export const LEYLINE_MCP_NAME = plugin.LEYLINE_MCP_NAME
+export const listWorktrees = plugin.listWorktrees
+export const boundWorktree = plugin.boundWorktree
+export const leylineStatus = plugin.leylineStatus
+export const WorktreeChromeService = plugin.WorktreeChromeService
+export const LeylineChromeService = plugin.LeylineChromeService
 
 export type { Config, PermissionMode, ProviderOverride, WorktreeConfig, WorktreeMode } from './config.ts'
 export type { ProviderId, ResolvedLaunch } from './providers.ts'

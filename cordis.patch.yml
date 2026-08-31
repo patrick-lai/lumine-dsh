@@ -40,6 +40,28 @@
     # with Lumine's collapsed activity strip.
     - id: lumine-chat
       name: '@lumine/dsh-chat'
+    # Host slash commands /review /wayfinder /pr-warden /second-opinion plus
+    # skill install into $DSH_HOME/skills (ACP children see the skill via
+    # command followup; native sessions also get the filesystem skills).
+    - id: lumine-skills
+      name: '@lumine/dsh-skills'
+    # 4-level Token Saver dial, prompt doctrine, cheaper host-subagent
+    # spawn routing. Persist: $DSH_HOME/.lumine-token-saver.json.
+    - id: lumine-token-saver
+      name: '@lumine/dsh-token-saver'
+    # Leyline memory MCP on the host plane. ACP children still use whatever
+    # `leyline install` already wired into the official CLI. fail-open so a
+    # missing `leyline` binary does not take down the web profile.
+    - id: mcp-leyline
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: leyline
+        transport: stdio
+        command: leyline
+        args:
+          - serve
+          - --stdio
+        failOnStartupError: false
 
 # Pin the in-page browse directory picker. directory-picker-auto picks native on
 # darwin; a detached `dsh` never shows the macOS dialog, so "+ Add workspace"

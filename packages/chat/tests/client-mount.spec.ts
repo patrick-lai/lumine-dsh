@@ -45,10 +45,10 @@ describe('lumine-chat client mount', () => {
     expect(registered[0]).toMatchObject({
       name: 'conversation.chat.node',
       key: 'tool-call',
+      priority: -1,
       locale: 'lumine-chat',
     })
-    const children = registered[0]?.children as { 'tool.call.toolview'?: { kind: string } }
-    expect(children['tool.call.toolview']?.kind).toBe('keyed')
+    expect(registered[0]?.children).toBeUndefined()
     expect(registered[0]?.component).toBeTypeOf('function')
     expect(dictionaries[0]?.en.actions).toBe('actions')
     expect(dictionaries[0]?.en.working).toBe('working…')

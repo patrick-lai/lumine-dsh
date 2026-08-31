@@ -18,6 +18,7 @@ export const DSH_PEERS = [
   '@deepseek-ai/dsh-llm',
   '@deepseek-ai/dsh-scope',
   '@deepseek-ai/dsh-session',
+  '@deepseek-ai/dsh-typert-protocol',
   '@deepseek-ai/dsh-user-approval',
 ] as const
 
@@ -58,6 +59,7 @@ export function dshModuleRoots(env: NodeJS.ProcessEnv = process.env, cwd = proce
     roots.push(join(home, 'profiles', name, 'node_modules'))
   }
   roots.push(join(home, 'profiles', 'node_modules'))
+  roots.push(join(home, 'cli', 'node_modules'))
   if (env.NODE_PATH) {
     for (const part of env.NODE_PATH.split(/[:;]/)) {
       if (part.trim()) roots.push(part.trim())

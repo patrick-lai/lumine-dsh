@@ -1,0 +1,10 @@
+# One-by-one install of @lumine/dsh-skills. This plugin only.
+#
+# Host slash commands + $DSH_HOME/skills install. Leyline MCP belongs on the
+# root lumine-dsh overlay (dsh-mcp-client / leyline serve --stdio).
+#
+# Do not disable agent-loop here. Do not re-insert directory-picker-browse.
+
+- insert:
+    - id: lumine-skills
+      name: '@lumine/dsh-skills'

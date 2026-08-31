@@ -48,12 +48,9 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',
     key: 'tool-call',
+    // Stock ui-tool already owns this key at priority 0 and declared
+    // tool.call.toolview. Lowest priority wins; do not redeclare children.
+    priority: -1,
     locale: NS,
-    children: {
-      'tool.call.toolview': {
-        kind: 'keyed',
-        scope: 'session',
-      },
-    },
   }, ToolGroupNode))
 }

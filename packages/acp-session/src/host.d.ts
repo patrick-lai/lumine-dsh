@@ -60,6 +60,14 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  import type { Context, Service } from '@deepseek-ai/cordis'
+  export abstract class TypertRemoteService extends Service {
+    constructor(ctx: Context, serviceKey: string, options?: { namespace?: string })
+  }
+  export function Remote(method: string): MethodDecorator
+}
+
 declare module '@deepseek-ai/dsh-session' {
   export type SessionId = string & { readonly __brand: 'SessionId' }
   export function SessionId(id: string): SessionId

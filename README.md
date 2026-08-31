@@ -2,12 +2,16 @@
 
 Lumine capabilities as [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins. This repository is the install home: `dsh plugin --profile web add github:patrick-lai/lumine-dsh` gets everything. Packages inside can also be installed one-by-one later.
 
-**Today that is four plugins:**
+**Today that is six plugins plus host Leyline MCP:**
 
-- `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into.
+- `@lumine/dsh-acp-session` — an ACP session factory so a DSH web session *is* Claude Code, Codex, Cursor, or Grok Build, using the official CLI you already logged into. Worktrees: git picker cwd spawns in a Raphael-shaped pooled worktree (`worktrees.mode` `auto` / `always` / `never`).
 - `@lumine/dsh-goal-completion` — the deferred DSH completion policy layer. A worker `update_goal` complete (or an ACP `GOAL REACHED` marker) is only a candidate until an isolated judge outputs `GOAL COMPLETION VERDICT: APPROVED`. Human `/goal` and RPC `goal.complete` stay operator-authoritative. This bundle disables host-plane `goal-round-driver` (the stock dsh-base row) so `dsh --dump-config` shows it absent from the mounted set; marker harvest owns continue on lumine ACP presets.
 - `@lumine/dsh-routines` — host-owned durable automations (calendar cron/interval, quiet hours, overlap guard, catch-up-once). The model can create paused rows only; an operator arms them. They sit **beside** official `@deepseek-ai/dsh-schedule`, which stays mounted as session-local reminders.
 - `@lumine/dsh-chat` — Lumine inbuilt-chat transcript. Consecutive ACP tool calls fold into one collapsed activity strip instead of a hundred generic "Tool call · read_file · …" rows.
+- `@lumine/dsh-skills` — host slash commands `/review`, `/wayfinder`, `/pr-warden`, `/second-opinion` plus skill install into `$DSH_HOME/skills` (leyline-memory, review, wayfinder, pr-warden, second-opinion). The command followup injects the skill body into the current ACP session.
+- `@lumine/dsh-token-saver` — 4-level Token Saver dial (`off` / `light` / `balanced` / `aggressive`) persisted at `$DSH_HOME/.lumine-token-saver.json`. Balanced+ injects GRAPH FIRST / fan-out doctrine and routes new host `subagents.start` cheaper (spawn-time only). `/token-saver` shows or sets the dial.
+
+The root overlay also mounts `@deepseek-ai/dsh-mcp-client` as `mcp-leyline` (`leyline serve --stdio`). Native DSH sessions see `mcp__leyline__*` tools. ACP `session/new` and `session/load` also pass that stdio server in `mcpServers` when `leyline` is on PATH, so Claude/Codex/Cursor/Grok children get Leyline tools without scraping tokens. Missing `leyline` leaves `mcpServers` empty and session create still works.
 
 Keyword for discovery: `dsh-plugin`.
 
@@ -224,6 +228,31 @@ pnpm test
 ```
 
 Tests use a fake ACP child. They do not require live CLIs.
+
+## Live e2e (plugin changes)
+
+The web profile is a `link:` of this repo. After you edit a plugin:
+
+```sh
+pnpm build
+pnpm e2e:link          # dsh plugin --profile web add link:$PWD
+```
+
+Then either restart the running `dsh web`, or boot a **second** instance so you do not kill the one already on `:3080` (a long-lived copy is `dsh --profile web --no-open --port 3081`):
+
+```sh
+pnpm e2e:fresh         # dsh web --no-open on a free port, then run the suite
+```
+
+Against an already-running DSH:
+
+```sh
+DSH_E2E_URL=http://127.0.0.1:3080 pnpm e2e
+```
+
+`pnpm e2e` POSTs the same `/api/<method>` RPC as `packages/acp-session/scripts/e2e-agents.mjs`. Session methods are dotted (`workspace.list`, `session.create`). Typert remotes are slashed with `{ args }` (`routine/list`, `commands/list` with `agentId`, `tokenSaver/get`). The suite probes workspace health, the four ACP presets (picker provider), routines, slash commands (`goal`, `review`, `wayfinder`, `pr-warden`, `second-opinion`, `token-saver`), and Token Saver state. Live pong/ping is skipped unless `DSH_E2E_SKIP_PROMPT=0`. Set `DSH_E2E_REQUIRE_NEW_COMMANDS=0` to require only `/goal` while iterating.
+
+`e2e:link` also symlinks each `@lumine/*` package into `~/.dsh/profiles/web/node_modules/@lumine`, because Cordis resolves plugin names from the profile, not from nested `lumine-dsh/node_modules`.
 
 ## What this is not
 
